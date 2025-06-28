@@ -6,8 +6,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Copy, ExternalLink } from "lucide-react";
+import { Copy, ExternalLink, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { complianceEngine } from "@/utils/complianceEngine";
 
 interface ListingCheck {
   id: string;
@@ -73,44 +74,21 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
     }
   ]);
 
+  // Enhanced mock compliance check using the new engine
   const mockComplianceCheck = async (title: string, description: string): Promise<ListingCheck> => {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 2000));
     
-    const flaggedTerms: string[] = [];
-    const suggestions: string[] = [];
-    let status: 'pass' | 'warning' | 'fail' = 'pass';
+    const result = complianceEngine.analyzeCompliance(title, description);
     
-    const text = `${title} ${description}`.toLowerCase();
-    
-    // Mock compliance logic
-    const riskTerms = ['disney', 'nike', 'apple', 'marvel', 'pokemon', 'gucci', 'louis vuitton'];
-    const warningTerms = ['inspired', 'style', 'type', 'like'];
-    
-    riskTerms.forEach(term => {
-      if (text.includes(term)) {
-        flaggedTerms.push(term);
-        status = 'fail';
-        suggestions.push(`Consider removing "${term}" and use generic descriptions`);
-      }
-    });
-    
-    warningTerms.forEach(term => {
-      if (text.includes(term) && status === 'pass') {
-        flaggedTerms.push(term);
-        status = 'warning';
-        suggestions.push(`Use more specific descriptive words instead of "${term}"`);
-      }
-    });
-
     return {
       id: Date.now().toString(),
       title,
       description,
-      status,
+      status: result.status,
       createdAt: new Date().toISOString(),
-      flaggedTerms,
-      suggestions
+      flaggedTerms: result.flaggedTerms,
+      suggestions: result.suggestions
     };
   };
 
@@ -188,7 +166,11 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
 
   const handleCheck = async () => {
     if (!listingTitle.trim() && !listingDescription.trim()) {
-      alert("Please enter a listing title or description to check");
+      toast({
+        title: "Missing Content",
+        description: "Please enter a listing title or description to check",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -196,8 +178,32 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
     try {
       const result = await mockComplianceCheck(listingTitle, listingDescription);
       setCurrentResult(result);
+      
+      // Show result toast
+      if (result.status === 'pass') {
+        toast({
+          title: "✅ Compliance Check Passed",
+          description: "Your listing looks good to go!",
+        });
+      } else if (result.status === 'warning') {
+        toast({
+          title: "⚠️ Policy Warnings Found",
+          description: `Found ${result.flaggedTerms.length} potential issues to review.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "❌ Compliance Issues Found",
+          description: `Found ${result.flaggedTerms.length} violations that need fixing.`,
+          variant: "destructive",
+        });
+      }
     } catch (error) {
-      alert("Error checking listing. Please try again.");
+      toast({
+        title: "Error",
+        description: "Error checking listing. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsChecking(false);
     }
@@ -218,6 +224,15 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
       case 'warning': return '⚠️';
       case 'fail': return '❌';
       default: return '📄';
+    }
+  };
+
+  const getStatusIconComponent = (status: string) => {
+    switch (status) {
+      case 'pass': return <CheckCircle className="w-5 h-5 text-success-600" />;
+      case 'warning': return <AlertTriangle className="w-5 h-5 text-warning-600" />;
+      case 'fail': return <XCircle className="w-5 h-5 text-danger-600" />;
+      default: return <CheckCircle className="w-5 h-5 text-gray-400" />;
     }
   };
 
@@ -246,7 +261,7 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
           <CardHeader>
             <CardTitle>Quick Compliance Check</CardTitle>
             <CardDescription>
-              Paste your listing details below to check for potential violations
+              Check your listing against Etsy's latest Creativity Standards (Updated July 2024)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -278,7 +293,7 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
               disabled={isChecking}
               className="bg-trust-600 hover:bg-trust-700"
             >
-              {isChecking ? "Analyzing..." : "Check Compliance"}
+              {isChecking ? "Analyzing Policy Compliance..." : "Check Against Etsy Policies"}
             </Button>
           </CardContent>
         </Card>
@@ -288,8 +303,8 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
           <Card className="mb-8">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <span>{getStatusIcon(currentResult.status)}</span>
-                Compliance Check Result
+                {getStatusIconComponent(currentResult.status)}
+                Etsy Policy Compliance Result
               </CardTitle>
               <Badge className={getStatusColor(currentResult.status)}>
                 {currentResult.status.toUpperCase()}
@@ -298,17 +313,19 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
             <CardContent>
               <div className="space-y-4">
                 <div>
-                  <h4 className="font-semibold text-gray-900">Checked Listing:</h4>
+                  <h4 className="font-semibold text-gray-900">Analyzed Listing:</h4>
                   <p className="text-sm text-gray-600 font-medium">{currentResult.title}</p>
                   <p className="text-sm text-gray-500 mt-1 line-clamp-2">{currentResult.description}</p>
                 </div>
                 
                 {currentResult.flaggedTerms.length > 0 && (
                   <div>
-                    <h4 className="font-semibold text-gray-900 mb-2">Flagged Terms:</h4>
+                    <h4 className="font-semibold text-gray-900 mb-2">Policy Violations Detected:</h4>
                     <div className="flex flex-wrap gap-2">
                       {currentResult.flaggedTerms.map((term, index) => (
-                        <Badge key={index} variant="destructive">{term}</Badge>
+                        <Badge key={index} variant="destructive" className="text-xs">
+                          {term}
+                        </Badge>
                       ))}
                     </div>
                   </div>
@@ -316,25 +333,37 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
                 
                 {currentResult.suggestions.length > 0 && (
                   <div>
-                    <h4 className="font-semibold text-gray-900 mb-2">Suggestions:</h4>
+                    <h4 className="font-semibold text-gray-900 mb-2">Recommended Actions:</h4>
                     <ul className="list-disc list-inside space-y-1">
-                      {currentResult.suggestions.map((suggestion, index) => (
+                      {currentResult.suggestions.slice(0, 5).map((suggestion, index) => (
                         <li key={index} className="text-sm text-gray-600">{suggestion}</li>
                       ))}
+                      {currentResult.suggestions.length > 5 && (
+                        <li className="text-sm text-gray-400 italic">...and {currentResult.suggestions.length - 5} more recommendations</li>
+                      )}
                     </ul>
                   </div>
                 )}
 
                 {currentResult.status === 'pass' && (
-                  <Button 
-                    onClick={() => generateComplianceProof(currentResult)}
-                    disabled={isGeneratingProof || userTier !== 'pro'}
-                    variant="outline" 
-                    className="mt-4"
-                  >
-                    {isGeneratingProof ? "Generating..." : "Generate Compliance Certificate"}
-                    {userTier !== 'pro' && " (Pro Only)"}
-                  </Button>
+                  <div className="bg-success-50 border border-success-200 p-4 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle className="w-5 h-5 text-success-600" />
+                      <h4 className="font-semibold text-success-800">Compliant with Etsy Policies</h4>
+                    </div>
+                    <p className="text-success-700 text-sm mb-3">
+                      Your listing passes all policy checks and is ready to publish.
+                    </p>
+                    <Button 
+                      onClick={() => generateComplianceProof(currentResult)}
+                      disabled={isGeneratingProof || userTier !== 'pro'}
+                      variant="outline" 
+                      className="border-success-300 text-success-700 hover:bg-success-50"
+                    >
+                      {isGeneratingProof ? "Generating Certificate..." : "Generate Compliance Certificate"}
+                      {userTier !== 'pro' && " (Pro Only)"}
+                    </Button>
+                  </div>
                 )}
               </div>
             </CardContent>
@@ -344,7 +373,7 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
         {/* Check History */}
         <Card>
           <CardHeader>
-            <CardTitle>Recent Compliance Checks</CardTitle>
+            <CardTitle>Recent Policy Compliance Checks</CardTitle>
             <CardDescription>
               {userTier === 'free' ? 'Showing last 10 checks' : 'Complete check history'}
             </CardDescription>
@@ -355,7 +384,7 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
                 <div key={check.id} className="flex items-center justify-between p-4 border rounded-lg">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span>{getStatusIcon(check.status)}</span>
+                      {getStatusIconComponent(check.status)}
                       <h4 className="font-medium text-gray-900">{check.title}</h4>
                       <Badge className={getStatusColor(check.status)}>
                         {check.status}
