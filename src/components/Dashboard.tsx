@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,6 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Copy, ExternalLink } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
 
 interface ListingCheck {
   id: string;
@@ -15,6 +17,15 @@ interface ListingCheck {
   createdAt: string;
   flaggedTerms: string[];
   suggestions: string[];
+}
+
+interface ComplianceProof {
+  id: string;
+  listingCheckId: string;
+  publicToken: string;
+  archivedTitle: string;
+  archivedDescription: string;
+  generatedAt: string;
 }
 
 interface DashboardProps {
@@ -27,7 +38,10 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
   const [listingDescription, setListingDescription] = useState("");
   const [isChecking, setIsChecking] = useState(false);
   const [currentResult, setCurrentResult] = useState<ListingCheck | null>(null);
-  
+  const [showProofDialog, setShowProofDialog] = useState(false);
+  const [currentProof, setCurrentProof] = useState<ComplianceProof | null>(null);
+  const [isGeneratingProof, setIsGeneratingProof] = useState(false);
+
   // Mock data for listing history
   const [checkHistory] = useState<ListingCheck[]>([
     {
@@ -98,6 +112,78 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
       flaggedTerms,
       suggestions
     };
+  };
+
+  const generateComplianceProof = async (listingCheck: ListingCheck) => {
+    if (userTier !== 'pro') {
+      toast({
+        title: "Pro Feature Required",
+        description: "Upgrade to Pro to generate compliance certificates.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (listingCheck.status !== 'pass') {
+      toast({
+        title: "Cannot Generate Proof",
+        description: "Only listings that pass compliance checks can generate certificates.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGeneratingProof(true);
+    
+    try {
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      const publicToken = `proof_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const proof: ComplianceProof = {
+        id: Date.now().toString(),
+        listingCheckId: listingCheck.id,
+        publicToken,
+        archivedTitle: listingCheck.title,
+        archivedDescription: listingCheck.description,
+        generatedAt: new Date().toISOString()
+      };
+
+      setCurrentProof(proof);
+      setShowProofDialog(true);
+      
+      toast({
+        title: "Compliance Certificate Generated",
+        description: "Your shareable compliance proof is ready.",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to generate compliance certificate. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingProof(false);
+    }
+  };
+
+  const copyProofLink = () => {
+    if (currentProof) {
+      const proofUrl = `${window.location.origin}/proof/${currentProof.publicToken}`;
+      navigator.clipboard.writeText(proofUrl);
+      toast({
+        title: "Link Copied",
+        description: "Compliance certificate link copied to clipboard.",
+      });
+    }
+  };
+
+  const openProofPage = () => {
+    if (currentProof) {
+      const proofUrl = `${window.location.origin}/proof/${currentProof.publicToken}`;
+      window.open(proofUrl, '_blank');
+    }
   };
 
   const handleCheck = async () => {
@@ -239,9 +325,15 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
                   </div>
                 )}
 
-                {userTier === 'pro' && currentResult.status === 'pass' && (
-                  <Button variant="outline" className="mt-4">
-                    Generate Compliance Certificate
+                {currentResult.status === 'pass' && (
+                  <Button 
+                    onClick={() => generateComplianceProof(currentResult)}
+                    disabled={isGeneratingProof || userTier !== 'pro'}
+                    variant="outline" 
+                    className="mt-4"
+                  >
+                    {isGeneratingProof ? "Generating..." : "Generate Compliance Certificate"}
+                    {userTier !== 'pro' && " (Pro Only)"}
                   </Button>
                 )}
               </div>
@@ -274,14 +366,69 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
                       {new Date(check.createdAt).toLocaleDateString()}
                     </p>
                   </div>
-                  <Button variant="ghost" size="sm">
-                    View Details
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" size="sm">
+                      View Details
+                    </Button>
+                    {check.status === 'pass' && userTier === 'pro' && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => generateComplianceProof(check)}
+                        disabled={isGeneratingProof}
+                      >
+                        Generate Proof
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
+
+        {/* Compliance Proof Dialog */}
+        <Dialog open={showProofDialog} onOpenChange={setShowProofDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Compliance Certificate Generated</DialogTitle>
+              <DialogDescription>
+                Your listing has been verified as compliant. Share this certificate with marketplaces or customers as proof of compliance.
+              </DialogDescription>
+            </DialogHeader>
+            {currentProof && (
+              <div className="space-y-4">
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h4 className="font-semibold text-sm text-gray-900 mb-2">Certificate Details</h4>
+                  <p className="text-sm text-gray-600">
+                    <strong>Listing:</strong> {currentProof.archivedTitle}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    <strong>Verified:</strong> {new Date(currentProof.generatedAt).toLocaleString()}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    <strong>Token:</strong> {currentProof.publicToken}
+                  </p>
+                </div>
+                
+                <div className="flex space-x-2">
+                  <Button onClick={copyProofLink} className="flex-1">
+                    <Copy className="w-4 h-4 mr-2" />
+                    Copy Link
+                  </Button>
+                  <Button onClick={openProofPage} variant="outline" className="flex-1">
+                    <ExternalLink className="w-4 h-4 mr-2" />
+                    View Certificate
+                  </Button>
+                </div>
+
+                <p className="text-xs text-gray-500 text-center">
+                  This certificate is publicly accessible and can be shared with anyone.
+                </p>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
