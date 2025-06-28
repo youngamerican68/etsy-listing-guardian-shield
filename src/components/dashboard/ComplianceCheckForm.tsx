@@ -5,8 +5,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "@/hooks/use-toast";
-import { complianceEngine } from "@/utils/complianceEngine";
+import { analyzeTextCompliance } from "@/utils/complianceAnalyzer";
+import { createError, getErrorMessage } from "@/utils/errorHandler";
+import { Loader2 } from "lucide-react";
 
 interface ListingCheck {
   id: string;
@@ -26,57 +29,56 @@ const ComplianceCheckForm = ({ onCheckComplete }: ComplianceCheckFormProps) => {
   const [listingTitle, setListingTitle] = useState("");
   const [listingDescription, setListingDescription] = useState("");
   const [isChecking, setIsChecking] = useState(false);
-
-  const mockComplianceCheck = async (title: string, description: string): Promise<ListingCheck> => {
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const result = complianceEngine.analyzeCompliance(title, description);
-    
-    return {
-      id: Date.now().toString(),
-      title,
-      description,
-      status: result.status,
-      createdAt: new Date().toISOString(),
-      flaggedTerms: result.flaggedTerms,
-      suggestions: result.suggestions
-    };
-  };
+  const [error, setError] = useState<string | null>(null);
 
   const handleCheck = async () => {
+    setError(null);
+    
+    // Validation
     if (!listingTitle.trim() && !listingDescription.trim()) {
-      toast({
-        title: "Missing Content",
-        description: "Please enter a listing title or description to check",
-        variant: "destructive",
-      });
+      setError("Please enter a listing title or description to check");
       return;
     }
 
     setIsChecking(true);
+    
     try {
-      const result = await mockComplianceCheck(listingTitle, listingDescription);
+      const analysisResult = await analyzeTextCompliance(listingTitle, listingDescription);
+      
+      const result: ListingCheck = {
+        id: Date.now().toString(),
+        title: listingTitle,
+        description: listingDescription,
+        status: analysisResult.status,
+        createdAt: new Date().toISOString(),
+        flaggedTerms: analysisResult.flaggedTerms,
+        suggestions: analysisResult.suggestions
+      };
+      
       onCheckComplete(result);
       
-      if (result.status === 'pass') {
+      // Success toast
+      if (analysisResult.status === 'pass') {
         toast({
           title: "✅ Compliance Check Passed",
           description: "Your listing looks good to go!",
         });
-      } else if (result.status === 'warning') {
+      } else if (analysisResult.status === 'warning') {
         toast({
           title: "⚠️ Policy Warnings Found",
-          description: `Found ${result.flaggedTerms.length} potential issues to review.`,
+          description: `Found ${analysisResult.flaggedTerms.length} potential issues to review.`,
           variant: "destructive",
         });
       } else {
         toast({
           title: "❌ Compliance Issues Found",
-          description: `Found ${result.flaggedTerms.length} violations that need fixing.`,
+          description: `Found ${analysisResult.flaggedTerms.length} violations that need fixing.`,
           variant: "destructive",
         });
       }
-    } catch (error) {
+    } catch (err) {
+      const errorMessage = getErrorMessage(err);
+      setError(`Error checking listing: ${errorMessage}`);
       toast({
         title: "Error",
         description: "Error checking listing. Please try again.",
@@ -104,6 +106,7 @@ const ComplianceCheckForm = ({ onCheckComplete }: ComplianceCheckFormProps) => {
             value={listingTitle}
             onChange={(e) => setListingTitle(e.target.value)}
             className="mt-1"
+            disabled={isChecking}
           />
         </div>
         
@@ -116,15 +119,29 @@ const ComplianceCheckForm = ({ onCheckComplete }: ComplianceCheckFormProps) => {
             onChange={(e) => setListingDescription(e.target.value)}
             rows={4}
             className="mt-1"
+            disabled={isChecking}
           />
         </div>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
         <Button 
           onClick={handleCheck} 
           disabled={isChecking}
           className="bg-trust-600 hover:bg-trust-700"
         >
-          {isChecking ? "Analyzing Policy Compliance..." : "Check Against Etsy Policies"}
+          {isChecking ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Analyzing Policy Compliance...
+            </>
+          ) : (
+            "Check Against Etsy Policies"
+          )}
         </Button>
       </CardContent>
     </Card>

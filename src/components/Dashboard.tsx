@@ -1,6 +1,7 @@
 
 import { useState } from "react";
 import { toast } from "@/hooks/use-toast";
+import { generateSecureToken } from "@/utils/tokenGenerator";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import ComplianceCheckForm from "@/components/dashboard/ComplianceCheckForm";
 import ComplianceResult from "@/components/dashboard/ComplianceResult";
@@ -92,7 +93,8 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
     try {
       await new Promise(resolve => setTimeout(resolve, 1500));
       
-      const publicToken = `proof_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // Use secure token generator
+      const publicToken = generateSecureToken();
       
       const proof: ComplianceProof = {
         id: Date.now().toString(),
