@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -50,7 +49,14 @@ const AdminRules = () => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setRules(data || []);
+      
+      // Type cast the risk_level to ensure TypeScript compatibility
+      const typedRules: ComplianceRule[] = (data || []).map(rule => ({
+        ...rule,
+        risk_level: rule.risk_level as 'high' | 'warning'
+      }));
+      
+      setRules(typedRules);
     } catch (error) {
       toast({
         title: "Error",

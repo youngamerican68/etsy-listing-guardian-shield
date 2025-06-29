@@ -51,7 +51,8 @@ const ComplianceCheckForm = ({ onCheckComplete }: ComplianceCheckFormProps) => {
           flaggedTerms: [...databaseResult.flaggedTerms, ...aiResult.flaggedTerms],
           suggestions: [...databaseResult.suggestions, ...aiResult.suggestions],
           status: aiResult.status === 'fail' ? 'fail' : databaseResult.status,
-          confidence: Math.min(databaseResult.confidence, aiResult.confidence)
+          confidence: Math.min(databaseResult.confidence, aiResult.confidence),
+          ruleMatches: databaseResult.ruleMatches
         };
       }
 

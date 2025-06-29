@@ -46,7 +46,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               .eq('id', session.user.id)
               .single();
             
-            setProfile(profileData);
+            if (profileData) {
+              setProfile({
+                ...profileData,
+                role: profileData.role as 'user' | 'admin'
+              });
+            }
             setLoading(false);
           }, 0);
         } else {
@@ -70,7 +75,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             .eq('id', session.user.id)
             .single();
           
-          setProfile(profileData);
+          if (profileData) {
+            setProfile({
+              ...profileData,
+              role: profileData.role as 'user' | 'admin'
+            });
+          }
           setLoading(false);
         }, 0);
       } else {

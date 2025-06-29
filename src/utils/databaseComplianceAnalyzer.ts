@@ -49,7 +49,7 @@ export const analyzeDatabaseCompliance = async (
       if (fullText.includes(rule.term)) {
         ruleMatches.push({
           term: rule.term,
-          risk_level: rule.risk_level,
+          risk_level: rule.risk_level as 'high' | 'warning',
           reason: rule.reason
         });
       }
