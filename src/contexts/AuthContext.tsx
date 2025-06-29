@@ -1,4 +1,3 @@
-
 'use client';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
@@ -14,6 +13,7 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   isAdmin: boolean;
+  // We no longer need to expose signIn/signUp from here
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -23,38 +23,40 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // This useEffect now ONLY handles the initial load.
   useEffect(() => {
-    console.log("AuthProvider: Starting up...");
-    
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log(`AuthProvider: Auth event fired: ${event}`);
-        const currentUser = session?.user ?? null;
-        setUser(currentUser);
+    async function getInitialSession() {
+      console.log("AuthProvider: Getting initial session...");
+      const { data: { session } } = await supabase.auth.getSession();
 
-        if (currentUser) {
-          try {
-            const { data: profileData, error } = await supabase
-              .from('profiles')
-              .select('id, role')
-              .eq('id', currentUser.id)
-              .single();
-            
-            if (error) throw error; // Jump to catch block if there's an error
-            
-            setProfile(profileData as Profile);
-            console.log("AuthProvider: Profile loaded successfully:", profileData);
-          } catch (error) {
-            console.error("AuthProvider: CRITICAL ERROR fetching profile:", error);
-            setProfile(null);
-          } finally {
-            console.log("AuthProvider: All tasks finished. Setting loading to false.");
-            setLoading(false);
-          }
-        } else {
+      if (session?.user) {
+        console.log("AuthProvider: User found in initial session. Fetching profile.");
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('id, role')
+          .eq('id', session.user.id)
+          .single();
+        
+        setUser(session.user);
+        setProfile(profileData as Profile);
+        console.log("AuthProvider: Initial profile loaded:", profileData);
+      }
+      
+      console.log("AuthProvider: Initial load complete. Setting loading to false.");
+      setLoading(false);
+    }
+
+    getInitialSession();
+
+    // This listener now ONLY handles changes AFTER the initial load.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === 'SIGNED_IN') {
+          setUser(session?.user ?? null);
+          // The profile will be fetched on the next page load/reload.
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
           setProfile(null);
-          console.log("AuthProvider: No user. Setting loading to false.");
-          setLoading(false);
         }
       }
     );
