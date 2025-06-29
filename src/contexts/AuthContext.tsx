@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
@@ -31,17 +30,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    console.log("AuthProvider: useEffect triggered.");
     setLoading(true);
 
-    // This one listener handles both initial session and subsequent changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log(`AuthProvider: onAuthStateChange fired with event: ${event}`);
+        
         setSession(session);
         const currentUser = session?.user ?? null;
         setUser(currentUser);
 
         if (currentUser) {
-          // Fetch user profile when user exists
+          console.log(`AuthProvider: User found (ID: ${currentUser.id}). Fetching profile...`);
           const { data: profileData, error } = await supabase
             .from('profiles')
             .select('*')
@@ -49,28 +50,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             .single();
             
           if (error) {
-            console.error('Error fetching profile:', error);
+            console.error('AuthProvider: Error fetching profile:', error); // <-- THIS WILL SHOW THE HIDDEN ERROR
             setProfile(null);
           } else if (profileData) {
+            console.log("AuthProvider: Profile fetched successfully.", profileData);
             const role = profileData.role;
             if (role === 'user' || role === 'admin') {
               setProfile({ ...profileData, role });
             } else {
-              console.error(`Invalid role "${role}" found for user ${currentUser.id}`);
-              // Default to 'user' role for safety
+              console.error(`AuthProvider: Invalid role "${role}" found. Defaulting to 'user'.`);
               setProfile({ ...profileData, role: 'user' });
             }
           }
         } else {
-          // User is logged out, clear profile
+          console.log("AuthProvider: No user session found.");
           setProfile(null);
         }
         
+        console.log("AuthProvider: Setting loading to false.");
         setLoading(false);
       }
     );
 
     return () => {
+      console.log("AuthProvider: Unsubscribing from auth state changes.");
       subscription.unsubscribe();
     };
   }, []);
