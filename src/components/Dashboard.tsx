@@ -1,7 +1,7 @@
 
 import { useState } from "react";
 import { toast } from "@/hooks/use-toast";
-import { generateSecureToken } from "@/utils/tokenGenerator";
+import { generateComplianceProof, type ComplianceProof } from "@/services/complianceProofService";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import ComplianceCheckForm from "@/components/dashboard/ComplianceCheckForm";
 import ComplianceResult from "@/components/dashboard/ComplianceResult";
@@ -18,15 +18,6 @@ interface ListingCheck {
   suggestions: string[];
 }
 
-interface ComplianceProof {
-  id: string;
-  listingCheckId: string;
-  publicToken: string;
-  archivedTitle: string;
-  archivedDescription: string;
-  generatedAt: string;
-}
-
 interface DashboardProps {
   userTier: 'free' | 'pro';
   onUpgrade: () => void;
@@ -38,7 +29,7 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
   const [currentProof, setCurrentProof] = useState<ComplianceProof | null>(null);
   const [isGeneratingProof, setIsGeneratingProof] = useState(false);
 
-  // Mock data for listing history
+  // Mock data for listing history - in a real app, this would come from the database too
   const [checkHistory] = useState<ListingCheck[]>([
     {
       id: "1",
@@ -69,7 +60,7 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
     }
   ]);
 
-  const generateComplianceProof = async (listingCheck: ListingCheck) => {
+  const handleGenerateComplianceProof = async (listingCheck: ListingCheck) => {
     if (userTier !== 'pro') {
       toast({
         title: "Pro Feature Required",
@@ -91,20 +82,8 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
     setIsGeneratingProof(true);
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const proof = await generateComplianceProof(listingCheck);
       
-      // Use secure token generator
-      const publicToken = generateSecureToken();
-      
-      const proof: ComplianceProof = {
-        id: Date.now().toString(),
-        listingCheckId: listingCheck.id,
-        publicToken,
-        archivedTitle: listingCheck.title,
-        archivedDescription: listingCheck.description,
-        generatedAt: new Date().toISOString()
-      };
-
       setCurrentProof(proof);
       setShowProofDialog(true);
       
@@ -113,9 +92,10 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
         description: "Your shareable compliance proof is ready.",
       });
     } catch (error) {
+      console.error('Failed to generate compliance proof:', error);
       toast({
         title: "Error",
-        description: "Failed to generate compliance certificate. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to generate compliance certificate. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -135,7 +115,7 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
             result={currentResult}
             userTier={userTier}
             isGeneratingProof={isGeneratingProof}
-            onGenerateProof={generateComplianceProof}
+            onGenerateProof={handleGenerateComplianceProof}
           />
         )}
 
@@ -143,7 +123,7 @@ const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
           checkHistory={checkHistory}
           userTier={userTier}
           isGeneratingProof={isGeneratingProof}
-          onGenerateProof={generateComplianceProof}
+          onGenerateProof={handleGenerateComplianceProof}
         />
 
         <ComplianceProofDialog 

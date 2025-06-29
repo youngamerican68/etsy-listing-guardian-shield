@@ -3,15 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Copy, ExternalLink } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-
-interface ComplianceProof {
-  id: string;
-  listingCheckId: string;
-  publicToken: string;
-  archivedTitle: string;
-  archivedDescription: string;
-  generatedAt: string;
-}
+import { type ComplianceProof } from "@/services/complianceProofService";
 
 interface ComplianceProofDialogProps {
   isOpen: boolean;
@@ -58,6 +50,9 @@ const ComplianceProofDialog = ({ isOpen, onOpenChange, proof }: ComplianceProofD
                 <strong>Verified:</strong> {new Date(proof.generatedAt).toLocaleString()}
               </p>
               <p className="text-sm text-gray-600">
+                <strong>Expires:</strong> {new Date(proof.expiresAt).toLocaleDateString()}
+              </p>
+              <p className="text-sm text-gray-600">
                 <strong>Token:</strong> {proof.publicToken}
               </p>
             </div>
@@ -74,7 +69,7 @@ const ComplianceProofDialog = ({ isOpen, onOpenChange, proof }: ComplianceProofD
             </div>
 
             <p className="text-xs text-gray-500 text-center">
-              This certificate is publicly accessible and can be shared with anyone.
+              This certificate is publicly accessible and can be shared with anyone. It expires on {new Date(proof.expiresAt).toLocaleDateString()}.
             </p>
           </div>
         )}

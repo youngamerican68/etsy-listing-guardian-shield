@@ -9,6 +9,57 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      compliance_proofs: {
+        Row: {
+          archived_description: string
+          archived_title: string
+          compliance_status: string
+          created_at: string | null
+          expires_at: string | null
+          flagged_terms: string[] | null
+          generated_at: string | null
+          id: string
+          is_active: boolean | null
+          listing_check_id: string
+          public_token: string
+          suggestions: string[] | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          archived_description: string
+          archived_title: string
+          compliance_status: string
+          created_at?: string | null
+          expires_at?: string | null
+          flagged_terms?: string[] | null
+          generated_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          listing_check_id: string
+          public_token: string
+          suggestions?: string[] | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          archived_description?: string
+          archived_title?: string
+          compliance_status?: string
+          created_at?: string | null
+          expires_at?: string | null
+          flagged_terms?: string[] | null
+          generated_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          listing_check_id?: string
+          public_token?: string
+          suggestions?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       compliance_rules: {
         Row: {
           created_at: string | null

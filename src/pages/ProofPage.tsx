@@ -1,32 +1,89 @@
 
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Shield, CheckCircle, Calendar, FileText } from "lucide-react";
-
-interface ComplianceProof {
-  id: string;
-  publicToken: string;
-  archivedTitle: string;
-  archivedDescription: string;
-  generatedAt: string;
-  status: 'verified';
-}
+import { Shield, CheckCircle, Calendar, FileText, AlertTriangle, XCircle } from "lucide-react";
+import { getComplianceProofByToken, type ComplianceProof } from "@/services/complianceProofService";
 
 const ProofPage = () => {
   const { token } = useParams<{ token: string }>();
-  
-  // Mock proof data - in real implementation, this would fetch from backend
-  const mockProof: ComplianceProof | null = token ? {
-    id: "1",
-    publicToken: token,
-    archivedTitle: "Handmade Sterling Silver Earrings",
-    archivedDescription: "Beautiful handcrafted earrings made with genuine sterling silver, featuring delicate butterfly designs. Each pair is individually crafted in our workshop using traditional techniques passed down through generations.",
-    generatedAt: "2024-01-15T10:30:00Z",
-    status: "verified"
-  } : null;
+  const [proof, setProof] = useState<ComplianceProof | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!mockProof) {
+  useEffect(() => {
+    const fetchProof = async () => {
+      if (!token) {
+        setError("Invalid certificate token");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const proofData = await getComplianceProofByToken(token);
+        if (proofData) {
+          setProof(proofData);
+        } else {
+          setError("Certificate not found or expired");
+        }
+      } catch (err) {
+        console.error('Error fetching proof:', err);
+        setError("Failed to load certificate");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProof();
+  }, [token]);
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'pass': return 'bg-success-100 text-success-800 border-success-200';
+      case 'warning': return 'bg-warning-100 text-warning-800 border-warning-200';
+      case 'fail': return 'bg-danger-100 text-danger-800 border-danger-200';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'pass': return <CheckCircle className="w-6 h-6 text-success-600" />;
+      case 'warning': return <AlertTriangle className="w-6 h-6 text-warning-600" />;
+      case 'fail': return <XCircle className="w-6 h-6 text-danger-600" />;
+      default: return <CheckCircle className="w-6 h-6 text-gray-400" />;
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'pass': return 'PASSED';
+      case 'warning': return 'WARNING';
+      case 'fail': return 'FAILED';
+      default: return 'UNKNOWN';
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="max-w-md mx-auto text-center">
+          <CardContent className="py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-trust-600 mx-auto mb-4"></div>
+            <h1 className="text-xl font-semibold text-gray-900 mb-2">
+              Loading Certificate...
+            </h1>
+            <p className="text-gray-600">
+              Please wait while we verify your compliance certificate.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (error || !proof) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card className="max-w-md mx-auto text-center">
@@ -36,7 +93,7 @@ const ProofPage = () => {
               Compliance Certificate Not Found
             </h1>
             <p className="text-gray-600">
-              The compliance certificate you're looking for doesn't exist or may have expired.
+              {error || "The compliance certificate you're looking for doesn't exist or may have expired."}
             </p>
           </CardContent>
         </Card>
@@ -64,12 +121,12 @@ const ProofPage = () => {
         <Card className="mb-8 border-2 border-trust-200">
           <CardHeader className="bg-trust-50 border-b border-trust-200">
             <div className="flex items-center gap-2">
-              <CheckCircle className="w-6 h-6 text-success-600" />
-              <CardTitle className="text-success-700">
-                Compliance Verified
+              {getStatusIcon(proof.complianceStatus)}
+              <CardTitle className={proof.complianceStatus === 'pass' ? 'text-success-700' : proof.complianceStatus === 'warning' ? 'text-warning-700' : 'text-danger-700'}>
+                Compliance {proof.complianceStatus === 'pass' ? 'Verified' : proof.complianceStatus === 'warning' ? 'Warning' : 'Failed'}
               </CardTitle>
-              <Badge className="bg-success-100 text-success-800 border-success-200">
-                PASSED
+              <Badge className={getStatusColor(proof.complianceStatus)}>
+                {getStatusText(proof.complianceStatus)}
               </Badge>
             </div>
           </CardHeader>
@@ -87,10 +144,10 @@ const ProofPage = () => {
                 
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <h4 className="font-semibold text-gray-900 mb-2">
-                    {mockProof.archivedTitle}
+                    {proof.archivedTitle}
                   </h4>
                   <p className="text-gray-700 text-sm leading-relaxed">
-                    {mockProof.archivedDescription}
+                    {proof.archivedDescription}
                   </p>
                 </div>
               </div>
@@ -108,14 +165,14 @@ const ProofPage = () => {
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <p className="text-sm text-gray-600 mb-1">Certificate ID</p>
                     <p className="font-mono text-sm text-gray-900 break-all">
-                      {mockProof.publicToken}
+                      {proof.publicToken}
                     </p>
                   </div>
                   
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <p className="text-sm text-gray-600 mb-1">Verified On</p>
                     <p className="text-sm text-gray-900">
-                      {new Date(mockProof.generatedAt).toLocaleDateString('en-US', {
+                      {new Date(proof.generatedAt).toLocaleDateString('en-US', {
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric',
@@ -125,23 +182,73 @@ const ProofPage = () => {
                       })}
                     </p>
                   </div>
+
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-600 mb-1">Expires On</p>
+                    <p className="text-sm text-gray-900">
+                      {new Date(proof.expiresAt).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </p>
+                  </div>
                 </div>
               </div>
 
               {/* Compliance Summary */}
-              <div className="bg-success-50 border border-success-200 p-6 rounded-lg">
-                <h3 className="text-lg font-semibold text-success-800 mb-2">
-                  Compliance Status: PASSED
+              <div className={`border p-6 rounded-lg ${
+                proof.complianceStatus === 'pass' 
+                  ? 'bg-success-50 border-success-200' 
+                  : proof.complianceStatus === 'warning'
+                  ? 'bg-warning-50 border-warning-200'
+                  : 'bg-danger-50 border-danger-200'
+              }`}>
+                <h3 className={`text-lg font-semibold mb-2 ${
+                  proof.complianceStatus === 'pass' 
+                    ? 'text-success-800' 
+                    : proof.complianceStatus === 'warning'
+                    ? 'text-warning-800'
+                    : 'text-danger-800'
+                }`}>
+                  Compliance Status: {getStatusText(proof.complianceStatus)}
                 </h3>
-                <p className="text-success-700 text-sm">
-                  This listing has been analyzed and verified to comply with marketplace policies and intellectual property guidelines at the time of verification.
+                
+                <p className={`text-sm mb-4 ${
+                  proof.complianceStatus === 'pass' 
+                    ? 'text-success-700' 
+                    : proof.complianceStatus === 'warning'
+                    ? 'text-warning-700'
+                    : 'text-danger-700'
+                }`}>
+                  {proof.complianceStatus === 'pass' 
+                    ? 'This listing has been analyzed and verified to comply with marketplace policies and intellectual property guidelines at the time of verification.'
+                    : proof.complianceStatus === 'warning'
+                    ? 'This listing has potential compliance issues that should be reviewed.'
+                    : 'This listing has failed compliance checks and should not be published without corrections.'
+                  }
                 </p>
                 
-                <div className="mt-4 text-xs text-success-600">
-                  <p>✓ No trademark violations detected</p>
-                  <p>✓ Policy compliance verified</p>
-                  <p>✓ Content authenticity confirmed</p>
-                </div>
+                {proof.complianceStatus === 'pass' && (
+                  <div className="text-xs text-success-600">
+                    <p>✓ No trademark violations detected</p>
+                    <p>✓ Policy compliance verified</p>
+                    <p>✓ Content authenticity confirmed</p>
+                  </div>
+                )}
+
+                {proof.flaggedTerms.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-sm font-semibold mb-2">Flagged Terms:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {proof.flaggedTerms.map((term, index) => (
+                        <Badge key={index} variant="destructive" className="text-xs">
+                          {term}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
@@ -155,7 +262,7 @@ const ProofPage = () => {
           <p>
             Certificate verification can be independently confirmed at{' '}
             <span className="text-trust-600 font-medium">
-              listingshield.com/proof/{mockProof.publicToken}
+              listingshield.com/proof/{proof.publicToken}
             </span>
           </p>
         </div>
