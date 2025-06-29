@@ -13,7 +13,9 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   isAdmin: boolean;
-  // We no longer need to expose signIn/signUp from here
+  signIn: (email: string, password:string) => Promise<{ error: any }>;
+  signUp: (email: string, password:string) => Promise<{ error: any }>;
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -23,14 +25,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // This useEffect now ONLY handles the initial load.
   useEffect(() => {
     async function getInitialSession() {
-      console.log("AuthProvider: Getting initial session...");
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session?.user) {
-        console.log("AuthProvider: User found in initial session. Fetching profile.");
         const { data: profileData } = await supabase
           .from('profiles')
           .select('id, role')
@@ -39,22 +38,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         
         setUser(session.user);
         setProfile(profileData as Profile);
-        console.log("AuthProvider: Initial profile loaded:", profileData);
       }
       
-      console.log("AuthProvider: Initial load complete. Setting loading to false.");
       setLoading(false);
     }
 
     getInitialSession();
 
-    // This listener now ONLY handles changes AFTER the initial load.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        if (event === 'SIGNED_IN') {
-          setUser(session?.user ?? null);
-          // The profile will be fetched on the next page load/reload.
-        } else if (event === 'SIGNED_OUT') {
+        // We only listen for sign out events, as sign-in will trigger a page reload
+        // which runs getInitialSession again.
+        if (event === 'SIGNED_OUT') {
           setUser(null);
           setProfile(null);
         }
@@ -66,11 +61,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
+  // --- ADD THESE FUNCTIONS BACK ---
+  const signIn = async (email: string, password: string) => {
+    return supabase.auth.signInWithPassword({ email, password });
+  };
+
+  const signUp = async (email: string, password: string) => {
+    return supabase.auth.signUp({ email, password });
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+  };
+  // --- END OF ADDED FUNCTIONS ---
+
   const value = {
     user,
     profile,
     loading,
-    isAdmin: profile?.role === 'admin'
+    isAdmin: profile?.role === 'admin',
+    signIn, // Add to value
+    signUp, // Add to value
+    signOut // Add to value
   };
 
   return (
