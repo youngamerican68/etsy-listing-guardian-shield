@@ -31,64 +31,48 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Set up auth state listener
+    setLoading(true);
+
+    // This one listener handles both initial session and subsequent changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
-          // Fetch user profile
-          setTimeout(async () => {
-            const { data: profileData } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', session.user.id)
-              .single();
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+
+        if (currentUser) {
+          // Fetch user profile when user exists
+          const { data: profileData, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', currentUser.id)
+            .single();
             
-            if (profileData) {
-              setProfile({
-                ...profileData,
-                role: profileData.role as 'user' | 'admin'
-              });
+          if (error) {
+            console.error('Error fetching profile:', error);
+            setProfile(null);
+          } else if (profileData) {
+            const role = profileData.role;
+            if (role === 'user' || role === 'admin') {
+              setProfile({ ...profileData, role });
+            } else {
+              console.error(`Invalid role "${role}" found for user ${currentUser.id}`);
+              // Default to 'user' role for safety
+              setProfile({ ...profileData, role: 'user' });
             }
-            setLoading(false);
-          }, 0);
+          }
         } else {
+          // User is logged out, clear profile
           setProfile(null);
-          setLoading(false);
         }
+        
+        setLoading(false);
       }
     );
 
-    // Check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        // Fetch user profile
-        setTimeout(async () => {
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-          
-          if (profileData) {
-            setProfile({
-              ...profileData,
-              role: profileData.role as 'user' | 'admin'
-            });
-          }
-          setLoading(false);
-        }, 0);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
