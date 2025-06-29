@@ -24,9 +24,9 @@ interface ComplianceRule {
 }
 
 const AdminRules = () => {
-  const { isAdmin, loading } = useAuth();
+  const { isAdmin, loading: authLoading } = useAuth(); // Renamed to avoid confusion
   const [rules, setRules] = useState<ComplianceRule[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [pageIsLoading, setPageIsLoading] = useState(true); // Renamed for clarity
   const [editingRule, setEditingRule] = useState<ComplianceRule | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
@@ -35,11 +35,29 @@ const AdminRules = () => {
     reason: ''
   });
 
+  // --- START: DEBUGGING LOG ---
+  // This log will help us diagnose the state of the component.
+  console.log("Admin Rules State Check:", { 
+    authContextIsLoading: authLoading, 
+    isAdmin, 
+    pageIsLoading 
+  });
+  // --- END: DEBUGGING LOG ---
+
   useEffect(() => {
-    if (!loading && isAdmin) {
-      fetchRules();
+    // If auth is still loading, we can't do anything yet.
+    if (authLoading) {
+      return; 
     }
-  }, [loading, isAdmin]);
+
+    // If auth is done and the user IS an admin, fetch the rules.
+    if (isAdmin) {
+      fetchRules();
+    } else {
+      // If auth is done and user IS NOT an admin, stop the page loading.
+      setPageIsLoading(false);
+    }
+  }, [authLoading, isAdmin]);
 
   const fetchRules = async () => {
     try {
@@ -50,7 +68,6 @@ const AdminRules = () => {
 
       if (error) throw error;
       
-      // Type cast the risk_level to ensure TypeScript compatibility
       const typedRules: ComplianceRule[] = (data || []).map(rule => ({
         ...rule,
         risk_level: rule.risk_level as 'high' | 'warning'
@@ -64,7 +81,7 @@ const AdminRules = () => {
         variant: "destructive",
       });
     } finally {
-      setIsLoading(false);
+      setPageIsLoading(false); // Stop loading after fetch is complete or fails
     }
   };
 
@@ -167,7 +184,8 @@ const AdminRules = () => {
     setIsDialogOpen(true);
   };
 
-  if (loading || isLoading) {
+  // This condition now uses the renamed state variables for clarity
+  if (authLoading || pageIsLoading) {
     return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
   }
 
@@ -183,8 +201,10 @@ const AdminRules = () => {
     );
   }
 
+  // ... rest of the JSX remains the same
   return (
     <div className="container mx-auto px-4 py-8">
+      {/* ... The rest of your return statement ... */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Compliance Rules Management</h1>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
