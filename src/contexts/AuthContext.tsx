@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
@@ -43,23 +44,39 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (currentUser) {
           console.log(`AuthProvider: User found (ID: ${currentUser.id}). Fetching profile...`);
-          const { data: profileData, error } = await supabase
+          
+          // Try to fetch the profile
+          const { data: profileData, error: fetchError } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', currentUser.id)
-            .single();
+            .maybeSingle();
             
-          if (error) {
-            console.error('AuthProvider: Error fetching profile:', error); // <-- THIS WILL SHOW THE HIDDEN ERROR
+          if (fetchError) {
+            console.error('AuthProvider: Error fetching profile:', fetchError);
             setProfile(null);
           } else if (profileData) {
             console.log("AuthProvider: Profile fetched successfully.", profileData);
-            const role = profileData.role;
-            if (role === 'user' || role === 'admin') {
-              setProfile({ ...profileData, role });
+            setProfile(profileData as Profile);
+          } else {
+            console.log("AuthProvider: No profile found. Creating new profile...");
+            // Profile does NOT exist. This is a new user. Create one.
+            const { data: newProfile, error: insertError } = await supabase
+              .from('profiles')
+              .insert({
+                id: currentUser.id,
+                email: currentUser.email,
+                role: 'user' // All new users default to 'user'
+              })
+              .select()
+              .single();
+              
+            if (insertError) {
+              console.error("AuthProvider: Error creating profile:", insertError);
+              setProfile(null);
             } else {
-              console.error(`AuthProvider: Invalid role "${role}" found. Defaulting to 'user'.`);
-              setProfile({ ...profileData, role: 'user' });
+              console.log("AuthProvider: New profile created successfully.", newProfile);
+              setProfile(newProfile as Profile);
             }
           }
         } else {
