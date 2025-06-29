@@ -3,16 +3,15 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-// ... other imports from your original file ...
-import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 interface ComplianceRule {
   id: string;
@@ -25,7 +24,7 @@ interface ComplianceRule {
 }
 
 const AdminRules = () => {
-  const { isAdmin, loading: authLoading, profile } = useAuth(); // Get profile for debugging
+  const { isAdmin, loading: authLoading, profile } = useAuth();
   const [rules, setRules] = useState<ComplianceRule[]>([]);
   const [pageIsLoading, setPageIsLoading] = useState(true);
   const [editingRule, setEditingRule] = useState<ComplianceRule | null>(null);
@@ -37,9 +36,6 @@ const AdminRules = () => {
   });
 
   useEffect(() => {
-    // This effect now ONLY decides when to fetch data or stop loading.
-    
-    // Guard clause: Do nothing until the auth state is fully resolved.
     if (authLoading) {
       console.log("AdminRules: Auth is still loading. Waiting...");
       return; 
@@ -54,10 +50,9 @@ const AdminRules = () => {
       fetchRules();
     } else {
       console.log("AdminRules: User is NOT an admin. Setting page loading to false.");
-      // If auth is done and the user is NOT an admin, we are done loading.
       setPageIsLoading(false);
     }
-  }, [authLoading, isAdmin]); // Dependencies are correct
+  }, [authLoading, isAdmin]);
 
   const fetchRules = async () => {
     console.log("AdminRules: fetchRules() function has started.");
@@ -76,7 +71,7 @@ const AdminRules = () => {
       
       setRules(typedRules);
       console.log("AdminRules: Successfully fetched rules.");
-    } catch (error)_ {
+    } catch (error) { // <--- THIS IS THE CORRECTED LINE
       toast({
         title: "Error",
         description: "Failed to fetch compliance rules",
@@ -84,19 +79,16 @@ const AdminRules = () => {
       });
       console.error("AdminRules: Error in fetchRules():", error);
     } finally {
-      // This is the crucial line that stops the "Loading..." message.
       setPageIsLoading(false);
       console.log("AdminRules: fetchRules() finished. Setting page loading to false.");
     }
   };
 
-  // ... All your handler functions (handleSubmit, handleDelete, etc.) remain exactly the same ...
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     try {
       if (editingRule) {
-        // Update existing rule
         const { error } = await supabase
           .from('compliance_rules')
           .update({
@@ -109,7 +101,6 @@ const AdminRules = () => {
         if (error) throw error;
         toast({ title: "Rule updated successfully" });
       } else {
-        // Create new rule
         const { error } = await supabase
           .from('compliance_rules')
           .insert({
@@ -208,7 +199,7 @@ const AdminRules = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      {/* ... The rest of your JSX ... */}
+      {/* The rest of your JSX remains the same */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Compliance Rules Management</h1>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
