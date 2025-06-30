@@ -1,68 +1,59 @@
-
+// In supabase/functions/get-user-profile/index.ts
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-// WARNING: The service_role key has super-admin rights. Do not expose it publicly.
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-);
-
 serve(async (req) => {
-  // Handle CORS preflight requests
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
-
+  console.log('--- get-user-profile function invoked ---');
   try {
-    console.log('get-user-profile: Function invoked');
-    
-    // 1. Get the user's JWT from the auth header
+    // --- Step 1: Check Environment Variables ---
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+    if (!supabaseUrl || !serviceRoleKey) {
+      console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+      throw new Error('Server configuration error.');
+    }
+    console.log('Environment variables loaded successfully.');
+
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+
+    // --- Step 2: Check Authorization Header ---
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      throw new Error('No authorization header found');
+      console.error('Missing Authorization header.');
+      throw new Error('Not authorized: Missing token.');
     }
-    
+    console.log('Authorization header found.');
     const jwt = authHeader.replace('Bearer ', '');
-    console.log('get-user-profile: JWT extracted');
-    
-    // 2. Get the user object from the JWT
+
+    // --- Step 3: Authenticate User ---
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(jwt);
     if (userError || !user) {
-      console.error('get-user-profile: Error getting user:', userError);
-      throw new Error('User not found or invalid token');
+      console.error('JWT validation error:', userError);
+      throw new Error('Not authorized: Invalid token.');
     }
-    
-    console.log('get-user-profile: User authenticated:', user.id);
-    
-    // 3. Use the admin client to fetch the user's profile, bypassing RLS
-    const { data: profile, error } = await supabaseAdmin
+    console.log(`User authenticated: ${user.id}`);
+
+    // --- Step 4: Fetch Profile ---
+    const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('id, role')
       .eq('id', user.id)
       .single();
-    
-    if (error) {
-      console.error('get-user-profile: Database error:', error);
-      throw error;
+
+    if (profileError) {
+      console.error('Error fetching profile from DB:', profileError);
+      throw new Error('Could not fetch user profile.');
     }
-    
-    console.log('get-user-profile: Profile fetched successfully:', profile);
-    
+    console.log('Profile fetched successfully:', profile);
+
     return new Response(JSON.stringify(profile), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       status: 200,
     });
   } catch (err) {
-    console.error('get-user-profile: Function error:', err);
-    return new Response(JSON.stringify({ error: String(err?.message ?? err) }), { 
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+    console.error('--- Function execution failed ---');
+    console.error(err.message);
+    return new Response(String(err?.message ?? err), { status: 500 });
   }
 });
