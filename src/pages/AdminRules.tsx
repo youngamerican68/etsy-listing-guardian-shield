@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react'; // <-- Add useRef
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
@@ -24,7 +24,7 @@ interface ComplianceRule {
 }
 
 const AdminRules = () => {
-  const { isAdmin, loading: authLoading, profile } = useAuth();
+  const { isAdmin, loading: authLoading } = useAuth();
   const [rules, setRules] = useState<ComplianceRule[]>([]);
   const [pageIsLoading, setPageIsLoading] = useState(true);
   const [editingRule, setEditingRule] = useState<ComplianceRule | null>(null);
@@ -35,27 +35,32 @@ const AdminRules = () => {
     reason: ''
   });
 
+  // This ref will track if it's the very first page load.
+  const isInitialLoad = useRef(true);
+
   useEffect(() => {
     if (authLoading) {
-      console.log("AdminRules: Auth is still loading. Waiting...");
       return; 
     }
 
-    console.log("AdminRules: Auth is DONE loading. Checking admin status...");
-    console.log("AdminRules: isAdmin value is:", isAdmin);
-    console.log("AdminRules: Profile object is:", profile);
-
     if (isAdmin) {
-      console.log("AdminRules: User IS an admin. Calling fetchRules().");
       fetchRules();
     } else {
-      console.log("AdminRules: User is NOT an admin. Setting page loading to false.");
       setPageIsLoading(false);
     }
   }, [authLoading, isAdmin]);
 
+  // This effect will run once after the first successful load to prevent future loading flashes.
+  useEffect(() => {
+    if (!pageIsLoading) {
+      isInitialLoad.current = false;
+    }
+  }, [pageIsLoading]);
+
   const fetchRules = async () => {
-    console.log("AdminRules: fetchRules() function has started.");
+    // We only set loading to true if it's not already loading, to prevent refetch loops.
+    if (!pageIsLoading) setPageIsLoading(true);
+
     try {
       const { data, error } = await supabase
         .from('compliance_rules')
@@ -70,17 +75,14 @@ const AdminRules = () => {
       }));
       
       setRules(typedRules);
-      console.log("AdminRules: Successfully fetched rules.");
-    } catch (error) { // <--- THIS IS THE CORRECTED LINE
+    } catch (error) {
       toast({
         title: "Error",
         description: "Failed to fetch compliance rules",
         variant: "destructive",
       });
-      console.error("AdminRules: Error in fetchRules():", error);
     } finally {
       setPageIsLoading(false);
-      console.log("AdminRules: fetchRules() finished. Setting page loading to false.");
     }
   };
 
@@ -165,13 +167,19 @@ const AdminRules = () => {
         .eq('id', id);
 
       if (error) throw error;
-      fetchRules();
+      // We'll update the local state immediately for a smoother experience
+      // and then refetch in the background to confirm.
+      setRules(currentRules => 
+        currentRules.map(r => r.id === id ? { ...r, is_active: !currentStatus } : r)
+      );
     } catch (error) {
       toast({
         title: "Error",
         description: "Failed to update rule status",
         variant: "destructive",
       });
+      // If the API call fails, refetch to revert the optimistic update
+      fetchRules();
     }
   };
 
@@ -181,7 +189,8 @@ const AdminRules = () => {
     setIsDialogOpen(true);
   };
   
-  if (authLoading || pageIsLoading) {
+  // Only show the full-page loading screen on the very first load.
+  if (authLoading || (pageIsLoading && isInitialLoad.current)) {
     return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
   }
 
@@ -199,7 +208,6 @@ const AdminRules = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      {/* The rest of your JSX remains the same */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Compliance Rules Management</h1>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
