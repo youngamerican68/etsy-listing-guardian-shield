@@ -37,7 +37,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         
         if (session?.user) {
           setUser(session.user);
-          await fetchProfile(session.user.id);
+          await fetchOrCreateProfile(session.user);
         }
       } catch (error) {
         console.error("AuthProvider: Error getting initial session:", error);
@@ -58,34 +58,58 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setLoading(false);
         } else if (event === 'SIGNED_IN' && session?.user) {
           setUser(session.user);
-          await fetchProfile(session.user.id);
+          await fetchOrCreateProfile(session.user);
           setLoading(false);
         }
       }
     );
 
     return () => {
-      subscription.unsubscribe();
+      subscription.unsubscribed();
     };
   }, []);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchOrCreateProfile = async (user: User) => {
     try {
-      const { data: profileData, error } = await supabase
+      console.log("AuthProvider: Fetching profile for user:", user.id);
+      
+      // First, try to fetch existing profile
+      const { data: profileData, error: fetchError } = await supabase
         .from('profiles')
         .select('id, role')
-        .eq('id', userId)
+        .eq('id', user.id)
         .single();
       
-      if (error) {
-        console.error("AuthProvider: Error fetching profile:", error);
+      if (fetchError && fetchError.code === 'PGRST116') {
+        // Profile doesn't exist, create it
+        console.log("AuthProvider: Profile not found, creating new profile");
+        
+        const { data: newProfile, error: createError } = await supabase
+          .from('profiles')
+          .insert({
+            id: user.id,
+            email: user.email,
+            role: 'user'
+          })
+          .select('id, role')
+          .single();
+        
+        if (createError) {
+          console.error("AuthProvider: Error creating profile:", createError);
+          setProfile(null);
+        } else {
+          setProfile(newProfile as Profile);
+          console.log("AuthProvider: Profile created successfully:", newProfile);
+        }
+      } else if (fetchError) {
+        console.error("AuthProvider: Error fetching profile:", fetchError);
         setProfile(null);
       } else {
         setProfile(profileData as Profile);
         console.log("AuthProvider: Profile loaded successfully:", profileData);
       }
     } catch (error) {
-      console.error("AuthProvider: CRITICAL ERROR fetching profile:", error);
+      console.error("AuthProvider: CRITICAL ERROR with profile:", error);
       setProfile(null);
     }
   };
