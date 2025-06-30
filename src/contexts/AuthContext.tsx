@@ -1,7 +1,7 @@
 
 'use client';
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
+import { User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
 interface Profile {
@@ -27,39 +27,55 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    console.log("AuthProvider: Starting up...");
+    console.log("AuthProvider: Starting up with Edge Function approach...");
     
-    // Get initial session
-    const getInitialSession = async () => {
+    async function getInitialSession() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        console.log("AuthProvider: Initial session:", session ? "Found" : "None");
+        const currentUser = session?.user ?? null;
+        console.log("AuthProvider: Initial session user:", currentUser ? "Found" : "None");
         
-        if (session?.user) {
-          setUser(session.user);
-          await fetchOrCreateProfile(session.user);
+        setUser(currentUser);
+        
+        if (currentUser) {
+          try {
+            console.log("AuthProvider: Invoking get-user-profile function...");
+            // Instead of a direct DB call, we invoke the trusted Edge Function
+            const { data, error } = await supabase.functions.invoke('get-user-profile');
+            
+            if (error) {
+              console.error("AuthProvider: Edge function error:", error);
+              throw error;
+            }
+            
+            console.log("AuthProvider: Profile loaded via Edge Function:", data);
+            setProfile(data);
+          } catch (error) {
+            console.error("AuthProvider: Error invoking get-user-profile function:", error);
+            setProfile(null);
+          }
         }
       } catch (error) {
-        console.error("AuthProvider: Error getting initial session:", error);
+        console.error("AuthProvider: Error in getInitialSession:", error);
       } finally {
         setLoading(false);
       }
-    };
+    }
 
     getInitialSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         console.log(`AuthProvider: Auth event fired: ${event}`);
         
         if (event === 'SIGNED_OUT') {
           setUser(null);
           setProfile(null);
           setLoading(false);
-        } else if (event === 'SIGNED_IN' && session?.user) {
-          setUser(session.user);
-          await fetchOrCreateProfile(session.user);
-          setLoading(false);
+        } else if (event === 'SIGNED_IN') {
+          // Reload the page on sign-in to trigger a fresh getInitialSession call
+          console.log("AuthProvider: Reloading page after sign-in");
+          window.location.reload();
         }
       }
     );
@@ -68,51 +84,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       subscription.unsubscribe();
     };
   }, []);
-
-  const fetchOrCreateProfile = async (user: User) => {
-    try {
-      console.log("AuthProvider: Fetching profile for user:", user.id);
-      
-      // First, try to fetch existing profile
-      const { data: profileData, error: fetchError } = await supabase
-        .from('profiles')
-        .select('id, role')
-        .eq('id', user.id)
-        .single();
-      
-      if (fetchError && fetchError.code === 'PGRST116') {
-        // Profile doesn't exist, create it
-        console.log("AuthProvider: Profile not found, creating new profile");
-        
-        const { data: newProfile, error: createError } = await supabase
-          .from('profiles')
-          .insert({
-            id: user.id,
-            email: user.email,
-            role: 'user'
-          })
-          .select('id, role')
-          .single();
-        
-        if (createError) {
-          console.error("AuthProvider: Error creating profile:", createError);
-          setProfile(null);
-        } else {
-          setProfile(newProfile as Profile);
-          console.log("AuthProvider: Profile created successfully:", newProfile);
-        }
-      } else if (fetchError) {
-        console.error("AuthProvider: Error fetching profile:", fetchError);
-        setProfile(null);
-      } else {
-        setProfile(profileData as Profile);
-        console.log("AuthProvider: Profile loaded successfully:", profileData);
-      }
-    } catch (error) {
-      console.error("AuthProvider: CRITICAL ERROR with profile:", error);
-      setProfile(null);
-    }
-  };
 
   const signIn = async (email: string, password: string) => {
     console.log("AuthProvider: Attempting sign in for:", email);
