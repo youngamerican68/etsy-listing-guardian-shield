@@ -77,12 +77,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-white">
-      <Header 
-        isLoggedIn={!!user}
-        onLoginClick={() => window.location.href = '/auth'}
-        onDashboardClick={() => setShowDashboard(true)}
-        onLogoutClick={handleLogout}
-      />
+      <Header />
       
       <Hero onGetStartedClick={handleGetStarted} />
       <Features />
