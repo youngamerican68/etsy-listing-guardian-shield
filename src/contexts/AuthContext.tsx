@@ -1,3 +1,4 @@
+
 'use client';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
@@ -13,8 +14,8 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   isAdmin: boolean;
-  signIn: (email: string, password:string) => Promise<{ error: any }>;
-  signUp: (email: string, password:string) => Promise<{ error: any }>;
+  signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
 }
 
@@ -26,32 +27,39 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function getInitialSession() {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (session?.user) {
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('id, role')
-          .eq('id', session.user.id)
-          .single();
+    console.log("AuthProvider: Starting up...");
+    
+    // Get initial session
+    const getInitialSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        console.log("AuthProvider: Initial session:", session ? "Found" : "None");
         
-        setUser(session.user);
-        setProfile(profileData as Profile);
+        if (session?.user) {
+          setUser(session.user);
+          await fetchProfile(session.user.id);
+        }
+      } catch (error) {
+        console.error("AuthProvider: Error getting initial session:", error);
+      } finally {
+        setLoading(false);
       }
-      
-      setLoading(false);
-    }
+    };
 
     getInitialSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        // We only listen for sign out events, as sign-in will trigger a page reload
-        // which runs getInitialSession again.
+      async (event, session) => {
+        console.log(`AuthProvider: Auth event fired: ${event}`);
+        
         if (event === 'SIGNED_OUT') {
           setUser(null);
           setProfile(null);
+          setLoading(false);
+        } else if (event === 'SIGNED_IN' && session?.user) {
+          setUser(session.user);
+          await fetchProfile(session.user.id);
+          setLoading(false);
         }
       }
     );
@@ -61,28 +69,56 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  // --- ADD THESE FUNCTIONS BACK ---
+  const fetchProfile = async (userId: string) => {
+    try {
+      const { data: profileData, error } = await supabase
+        .from('profiles')
+        .select('id, role')
+        .eq('id', userId)
+        .single();
+      
+      if (error) {
+        console.error("AuthProvider: Error fetching profile:", error);
+        setProfile(null);
+      } else {
+        setProfile(profileData as Profile);
+        console.log("AuthProvider: Profile loaded successfully:", profileData);
+      }
+    } catch (error) {
+      console.error("AuthProvider: CRITICAL ERROR fetching profile:", error);
+      setProfile(null);
+    }
+  };
+
   const signIn = async (email: string, password: string) => {
+    console.log("AuthProvider: Attempting sign in for:", email);
     return supabase.auth.signInWithPassword({ email, password });
   };
 
   const signUp = async (email: string, password: string) => {
-    return supabase.auth.signUp({ email, password });
+    console.log("AuthProvider: Attempting sign up for:", email);
+    return supabase.auth.signUp({ 
+      email, 
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/`
+      }
+    });
   };
 
   const signOut = async () => {
+    console.log("AuthProvider: Signing out");
     await supabase.auth.signOut();
   };
-  // --- END OF ADDED FUNCTIONS ---
 
   const value = {
     user,
     profile,
     loading,
     isAdmin: profile?.role === 'admin',
-    signIn, // Add to value
-    signUp, // Add to value
-    signOut // Add to value
+    signIn,
+    signUp,
+    signOut
   };
 
   return (
