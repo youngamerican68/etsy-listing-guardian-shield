@@ -2,15 +2,16 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 
-// These are the required CORS headers for preflight requests
+// These are the required CORS headers for preflight requests.
+// This version is more complete and includes Access-Control-Allow-Methods.
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS', // <-- The crucial addition
 };
 
 serve(async (req) => {
   // This is the crucial CORS preflight handler.
-  // It immediately responds to OPTIONS requests with the correct headers.
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -36,11 +37,13 @@ serve(async (req) => {
 
     if (error) throw error;
 
+    // Return the successful response with CORS headers.
     return new Response(JSON.stringify(profile), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
   } catch (err) {
+    // Return the error response with CORS headers.
     return new Response(String(err?.message ?? err), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500
