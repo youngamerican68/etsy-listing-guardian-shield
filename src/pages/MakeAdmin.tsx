@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,16 +18,19 @@ const MakeAdmin = () => {
       // First, get the user ID from the email
       const { data: userList, error: userError } = await supabase.auth.admin.listUsers();
       
-      if (userError) {
+      // --- FIX 1: Robustly check for both an error and the existence of the data object ---
+      // This is the primary fix for the TypeScript 'never' type error.
+      if (userError || !userList) {
         console.error('Error fetching users:', userError);
         toast({
           title: "Error",
-          description: "Could not fetch users. This might require admin privileges.",
+          description: "Could not fetch the user list. This action likely requires elevated privileges.",
           variant: "destructive",
         });
         return;
       }
 
+      // Now it's safe to access userList.users
       const targetUser = userList.users.find(user => user.email === email);
       
       if (!targetUser) {
@@ -40,12 +42,12 @@ const MakeAdmin = () => {
         return;
       }
 
-      // Update the user's role to admin
+      // --- FIX 2: Simplified upsert operation for clarity and efficiency ---
+      // We only need the ID to find the profile and the role to update it.
       const { error: updateError } = await supabase
         .from('profiles')
         .upsert({
           id: targetUser.id,
-          email: targetUser.email,
           role: 'admin'
         });
 
@@ -53,7 +55,7 @@ const MakeAdmin = () => {
         console.error('Error updating user role:', updateError);
         toast({
           title: "Error",
-          description: "Failed to update user role.",
+          description: "Failed to update user role. Check database policies or constraints.",
           variant: "destructive",
         });
       } else {
