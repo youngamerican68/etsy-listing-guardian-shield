@@ -43,7 +43,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (existingProfile) {
         console.log('Found existing profile:', existingProfile);
-        setProfile(existingProfile);
+        // Type assertion to ensure role is properly typed
+        setProfile({
+          id: existingProfile.id,
+          role: (existingProfile.role as 'user' | 'admin') || 'user'
+        });
         return;
       }
 
@@ -66,7 +70,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       console.log('Created new profile:', newProfile);
-      setProfile(newProfile);
+      // Type assertion to ensure role is properly typed
+      setProfile({
+        id: newProfile.id,
+        role: (newProfile.role as 'user' | 'admin') || 'user'
+      });
     } catch (error) {
       console.error("Error in fetchUserProfile:", error);
       setProfile(null);
