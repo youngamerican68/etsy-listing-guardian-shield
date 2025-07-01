@@ -26,26 +26,49 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchUserProfile = async (accessToken: string) => {
+  const fetchUserProfile = async (userId: string) => {
     try {
-      console.log('Fetching user profile with token:', accessToken.substring(0, 20) + '...');
+      console.log('Fetching user profile for user:', userId);
       
-      const { data, error } = await supabase.functions.invoke('get-user-profile', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+      // Try to get existing profile first
+      const { data: existingProfile, error: fetchError } = await supabase
+        .from('profiles')
+        .select('id, role')
+        .eq('id', userId)
+        .maybeSingle();
 
-      if (error) {
-        console.error("Error invoking get-user-profile function:", error);
+      if (fetchError) {
+        console.error("Error fetching profile:", fetchError);
+      }
+
+      if (existingProfile) {
+        console.log('Found existing profile:', existingProfile);
+        setProfile(existingProfile);
+        return;
+      }
+
+      // If no profile exists, create one
+      console.log('No profile found, creating new one');
+      const { data: newProfile, error: createError } = await supabase
+        .from('profiles')
+        .insert([{ 
+          id: userId, 
+          role: 'user',
+          email: user?.email || null
+        }])
+        .select('id, role')
+        .single();
+
+      if (createError) {
+        console.error("Error creating profile:", createError);
         setProfile(null);
         return;
       }
 
-      console.log('Profile data received:', data);
-      setProfile(data);
+      console.log('Created new profile:', newProfile);
+      setProfile(newProfile);
     } catch (error) {
-      console.error("Error fetching user profile:", error);
+      console.error("Error in fetchUserProfile:", error);
       setProfile(null);
     }
   };
@@ -57,8 +80,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const currentUser = session?.user ?? null;
         setUser(currentUser);
 
-        if (currentUser && session?.access_token) {
-          await fetchUserProfile(session.access_token);
+        if (currentUser) {
+          await fetchUserProfile(currentUser.id);
         } else {
           setProfile(null);
         }
@@ -80,16 +103,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (event === 'SIGNED_OUT') {
           setUser(null);
           setProfile(null);
-        } else if (event === 'SIGNED_IN' && session) {
+        } else if (event === 'SIGNED_IN' && session?.user) {
           setUser(session.user);
-          if (session.access_token) {
-            await fetchUserProfile(session.access_token);
-          }
-        } else if (event === 'TOKEN_REFRESHED' && session) {
+          // Use setTimeout to avoid blocking the auth state change
+          setTimeout(() => {
+            fetchUserProfile(session.user.id);
+          }, 0);
+        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
           setUser(session.user);
-          if (session.access_token) {
-            await fetchUserProfile(session.access_token);
-          }
+          setTimeout(() => {
+            fetchUserProfile(session.user.id);
+          }, 0);
         }
         
         setLoading(false);
