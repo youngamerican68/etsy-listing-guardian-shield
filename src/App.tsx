@@ -11,8 +11,6 @@ import AuthPage from "./pages/AuthPage";
 import AdminRules from "./pages/AdminRules";
 import AuthTest from "./pages/AuthTest";
 import NotFound from "./pages/NotFound";
-import MakeAdmin from "./pages/MakeAdmin";
-import Dashboard from "./components/Dashboard";
 
 const queryClient = new QueryClient();
 
@@ -26,10 +24,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<AuthPage />} />
-            <Route path="/login" element={<AuthPage />} />
-            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/admin/rules" element={<AdminRules />} />
-            <Route path="/admin/make-admin" element={<MakeAdmin />} />
             <Route path="/test" element={<AuthTest />} />
             <Route path="/proof/:token" element={<ProofPage />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

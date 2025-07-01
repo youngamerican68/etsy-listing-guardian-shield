@@ -1,6 +1,5 @@
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
 import { generateComplianceProof, type ComplianceProof } from "@/services/complianceProofService";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
@@ -19,13 +18,16 @@ interface ListingCheck {
   suggestions: string[];
 }
 
-const Dashboard = () => {
+interface DashboardProps {
+  userTier: 'free' | 'pro';
+  onUpgrade: () => void;
+}
+
+const Dashboard = ({ userTier, onUpgrade }: DashboardProps) => {
   const [currentResult, setCurrentResult] = useState<ListingCheck | null>(null);
   const [showProofDialog, setShowProofDialog] = useState(false);
   const [currentProof, setCurrentProof] = useState<ComplianceProof | null>(null);
   const [isGeneratingProof, setIsGeneratingProof] = useState(false);
-  const [userTier, setUserTier] = useState<'free' | 'pro'>('free');
-  const navigate = useNavigate();
 
   // Mock data for listing history - in a real app, this would come from the database too
   const [checkHistory] = useState<ListingCheck[]>([
@@ -57,14 +59,6 @@ const Dashboard = () => {
       suggestions: ["Vintage Athletic Sneakers", "Retro Sports Shoes", "Classic Runner Design"]
     }
   ]);
-
-  const handleUpgrade = () => {
-    setUserTier('pro');
-    toast({
-      title: "Upgraded to Pro!",
-      description: "You now have unlimited listing checks and premium features.",
-    });
-  };
 
   const handleGenerateComplianceProof = async (listingCheck: ListingCheck) => {
     if (userTier !== 'pro') {
@@ -112,7 +106,7 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-6xl mx-auto px-4 py-8">
-        <DashboardHeader userTier={userTier} onUpgrade={handleUpgrade} />
+        <DashboardHeader userTier={userTier} onUpgrade={onUpgrade} />
         
         <ComplianceCheckForm onCheckComplete={setCurrentResult} />
 
