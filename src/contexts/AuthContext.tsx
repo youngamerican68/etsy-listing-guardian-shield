@@ -1,4 +1,3 @@
-
 'use client';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '@supabase/supabase-js';
@@ -14,8 +13,8 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   isAdmin: boolean;
-  signIn: (email: string, password: string) => Promise<any>;
-  signUp: (email: string, password: string) => Promise<any>;
+  signIn: (email: string, password:string) => Promise<any>;
+  signUp: (email: string, password:string) => Promise<any>;
   signOut: () => Promise<any>;
 }
 
@@ -33,7 +32,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(currentUser);
 
       if (currentUser) {
-        await fetchUserProfile(currentUser.id);
+        try {
+          const { data, error } = await supabase.functions.invoke('get-user-profile', {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
+
+          if (error) throw error;
+          setProfile(data);
+
+        } catch (error) {
+          console.error("Error invoking get-user-profile function:", error);
+          setProfile(null);
+        }
       }
       setLoading(false);
     }
@@ -41,13 +53,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     getInitialSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         if (event === 'SIGNED_OUT') {
           setUser(null);
           setProfile(null);
-        } else if (event === 'SIGNED_IN' && session?.user) {
-          setUser(session.user);
-          await fetchUserProfile(session.user.id);
+        } else if (event === 'SIGNED_IN') {
+          window.location.reload();
         }
       }
     );
@@ -57,79 +68,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  const fetchUserProfile = async (userId: string) => {
-    try {
-      // First try to get existing profile
-      const { data: existingProfile, error: fetchError } = await supabase
-        .from('profiles')
-        .select('id, role')
-        .eq('id', userId)
-        .single();
-
-      if (existingProfile) {
-        setProfile({
-          id: existingProfile.id,
-          role: existingProfile.role as 'user' | 'admin'
-        });
-        return;
-      }
-
-      // If profile doesn't exist, create it
-      if (fetchError?.code === 'PGRST116') {
-        const { data: newProfile, error: insertError } = await supabase
-          .from('profiles')
-          .insert({
-            id: userId,
-            role: 'user'
-          })
-          .select('id, role')
-          .single();
-
-        if (insertError) {
-          console.error("Error creating profile:", insertError);
-          setProfile(null);
-        } else if (newProfile) {
-          setProfile({
-            id: newProfile.id,
-            role: newProfile.role as 'user' | 'admin'
-          });
-        }
-      } else {
-        console.error("Error fetching profile:", fetchError);
-        setProfile(null);
-      }
-    } catch (error) {
-      console.error("Error in fetchUserProfile:", error);
-      setProfile(null);
-    }
-  };
-
+  // --- ADD THESE FUNCTIONS BACK ---
   const signIn = async (email: string, password: string) => {
     return supabase.auth.signInWithPassword({ email, password });
   };
 
   const signUp = async (email: string, password: string) => {
-    return supabase.auth.signUp({ 
-      email, 
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/`
-      }
-    });
+    return supabase.auth.signUp({ email, password });
   };
 
   const signOut = async () => {
     return supabase.auth.signOut();
   };
+  // --- END OF ADDED FUNCTIONS ---
 
   const value = {
     user,
     profile,
     loading,
     isAdmin: profile?.role === 'admin',
-    signIn,
-    signUp,
-    signOut
+    signIn, // Add to value
+    signUp, // Add to value
+    signOut // Add to value
   };
 
   return (

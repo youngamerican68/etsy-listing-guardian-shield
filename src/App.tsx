@@ -10,7 +10,6 @@ import ProofPage from "./pages/ProofPage";
 import AuthPage from "./pages/AuthPage";
 import AdminRules from "./pages/AdminRules";
 import AuthTest from "./pages/AuthTest";
-import MakeAdmin from "./pages/MakeAdmin";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -26,7 +25,6 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/admin/rules" element={<AdminRules />} />
-            <Route path="/admin/make-admin" element={<MakeAdmin />} />
             <Route path="/test" element={<AuthTest />} />
             <Route path="/proof/:token" element={<ProofPage />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
