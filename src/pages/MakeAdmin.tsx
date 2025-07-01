@@ -1,3 +1,4 @@
+
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,64 +13,40 @@ const MakeAdmin = () => {
 
   const handleMakeAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email) return;
     setIsLoading(true);
 
     try {
-      // First, get the user ID from the email
-      const { data: userList, error: userError } = await supabase.auth.admin.listUsers();
-      
-      // --- FIX 1: Robustly check for both an error and the existence of the data object ---
-      // This is the primary fix for the TypeScript 'never' type error.
-      if (userError || !userList) {
-        console.error('Error fetching users:', userError);
-        toast({
-          title: "Error",
-          description: "Could not fetch the user list. This action likely requires elevated privileges.",
-          variant: "destructive",
-        });
-        return;
+      // Get the current user's session to pass their JWT for authorization
+      const session = (await supabase.auth.getSession()).data.session;
+      if (!session) {
+        throw new Error("You must be logged in to perform this action.");
       }
 
-      // Now it's safe to access userList.users
-      const targetUser = userList.users.find(user => user.email === email);
-      
-      if (!targetUser) {
-        toast({
-          title: "User not found",
-          description: "No user found with that email address.",
-          variant: "destructive",
-        });
-        return;
+      // Securely invoke the edge function, passing the JWT in the Authorization header.
+      const { data, error } = await supabase.functions.invoke('make-admin', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: { email },
+      });
+
+      if (error) {
+        // The function's response error is often in the context object
+        throw new Error(error.context?.message || error.message);
       }
 
-      // --- FIX 2: Simplified upsert operation for clarity and efficiency ---
-      // We only need the ID to find the profile and the role to update it.
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .upsert({
-          id: targetUser.id,
-          role: 'admin'
-        });
+      toast({
+        title: "Success",
+        description: data.message || `The operation was successful.`,
+      });
+      setEmail('');
 
-      if (updateError) {
-        console.error('Error updating user role:', updateError);
-        toast({
-          title: "Error",
-          description: "Failed to update user role. Check database policies or constraints.",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Success",
-          description: `User ${email} has been made an admin.`,
-        });
-        setEmail('');
-      }
-    } catch (error) {
-      console.error('Unexpected error:', error);
+    } catch (error: any) {
+      console.error('Error making user admin:', error);
       toast({
         title: "Error",
-        description: "An unexpected error occurred.",
+        description: error.message || "An unexpected error occurred.",
         variant: "destructive",
       });
     } finally {
