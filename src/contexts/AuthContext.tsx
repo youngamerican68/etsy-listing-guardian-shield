@@ -24,81 +24,69 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchingProfile, setFetchingProfile] = useState(false);
+
+  const fetchProfileSafely = async (userId: string) => {
+    if (fetchingProfile) return null;
+    setFetchingProfile(true);
+    
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('id, role')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (error) {
+        console.warn("Profile fetch failed, creating default:", error);
+        return { id: userId, role: 'user' as const };
+      }
+
+      if (!profile) {
+        // Try to create profile
+        const { data: newProfile, error: insertError } = await supabase
+          .from('profiles')
+          .insert({ id: userId, role: 'user' })
+          .select('id, role')
+          .single();
+
+        if (insertError) {
+          console.warn("Failed to create profile:", insertError);
+          return { id: userId, role: 'user' as const };
+        }
+        
+        return newProfile as Profile;
+      }
+
+      return profile as Profile;
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+      return { id: userId, role: 'user' as const };
+    } finally {
+      setFetchingProfile(false);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
 
-    async function getInitialSession() {
+    async function initialize() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        const currentUser = session?.user ?? null;
         
         if (!mounted) return;
+        
+        const currentUser = session?.user ?? null;
         setUser(currentUser);
 
         if (currentUser) {
-          // Directly query the profiles table with retry logic
-          let profile = null;
-          let retryCount = 0;
-          const maxRetries = 3;
-
-          while (retryCount < maxRetries && !profile && mounted) {
-            try {
-              const { data: profileData, error } = await supabase
-                .from('profiles')
-                .select('id, role')
-                .eq('id', currentUser.id)
-                .maybeSingle();
-
-              if (error) {
-                console.warn(`Profile fetch attempt ${retryCount + 1} failed:`, error);
-                if (retryCount === maxRetries - 1) throw error;
-                retryCount++;
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
-                continue;
-              }
-
-              profile = profileData;
-              break;
-            } catch (error) {
-              retryCount++;
-              if (retryCount >= maxRetries) {
-                console.error("Max retries reached for profile fetch:", error);
-                // Create a default profile as fallback
-                profile = { id: currentUser.id, role: 'user' };
-                break;
-              }
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-          }
-
-          // If no profile exists, try to create one
-          if (!profile && mounted) {
-            try {
-              const { data: newProfile, error: insertError } = await supabase
-                .from('profiles')
-                .insert({ id: currentUser.id, role: 'user' })
-                .select('id, role')
-                .single();
-
-              if (!insertError) {
-                profile = newProfile;
-              } else {
-                console.warn("Failed to create profile:", insertError);
-                profile = { id: currentUser.id, role: 'user' };
-              }
-            } catch (error) {
-              console.warn("Error creating profile:", error);
-              profile = { id: currentUser.id, role: 'user' };
-            }
-          }
-
+          const userProfile = await fetchProfileSafely(currentUser.id);
           if (mounted) {
-            setProfile(profile as Profile);
+            setProfile(userProfile);
           }
         }
       } catch (error) {
-        console.error("Error in auth initialization:", error);
+        console.error("Auth initialization error:", error);
         if (mounted) {
           setUser(null);
           setProfile(null);
@@ -110,7 +98,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     }
 
-    getInitialSession();
+    initialize();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
@@ -120,7 +108,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setUser(null);
           setProfile(null);
         } else if (event === 'SIGNED_IN') {
-          window.location.reload();
+          // Prevent reload loop - just update the state
+          const newUser = session?.user ?? null;
+          setUser(newUser);
+          if (newUser) {
+            fetchProfileSafely(newUser.id).then(userProfile => {
+              if (mounted) {
+                setProfile(userProfile);
+              }
+            });
+          }
         }
       }
     );
