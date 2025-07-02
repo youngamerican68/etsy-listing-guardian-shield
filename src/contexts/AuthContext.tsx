@@ -26,48 +26,96 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+
     async function getInitialSession() {
-      const { data: { session } } = await supabase.auth.getSession();
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const currentUser = session?.user ?? null;
+        
+        if (!mounted) return;
+        setUser(currentUser);
 
-      if (currentUser) {
-        try {
-          // Directly query the profiles table instead of using Edge Function
-          let { data: profile, error } = await supabase
-            .from('profiles')
-            .select('id, role')
-            .eq('id', currentUser.id)
-            .maybeSingle();
+        if (currentUser) {
+          // Directly query the profiles table with retry logic
+          let profile = null;
+          let retryCount = 0;
+          const maxRetries = 3;
 
-          if (error) throw error;
+          while (retryCount < maxRetries && !profile && mounted) {
+            try {
+              const { data: profileData, error } = await supabase
+                .from('profiles')
+                .select('id, role')
+                .eq('id', currentUser.id)
+                .maybeSingle();
 
-          // If no profile exists, create one with default user role
-          if (!profile) {
-            const { data: newProfile, error: insertError } = await supabase
-              .from('profiles')
-              .insert({ id: currentUser.id, role: 'user' })
-              .select('id, role')
-              .single();
+              if (error) {
+                console.warn(`Profile fetch attempt ${retryCount + 1} failed:`, error);
+                if (retryCount === maxRetries - 1) throw error;
+                retryCount++;
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
+                continue;
+              }
 
-            if (insertError) throw insertError;
-            profile = newProfile;
+              profile = profileData;
+              break;
+            } catch (error) {
+              retryCount++;
+              if (retryCount >= maxRetries) {
+                console.error("Max retries reached for profile fetch:", error);
+                // Create a default profile as fallback
+                profile = { id: currentUser.id, role: 'user' };
+                break;
+              }
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
           }
 
-          setProfile(profile as Profile);
+          // If no profile exists, try to create one
+          if (!profile && mounted) {
+            try {
+              const { data: newProfile, error: insertError } = await supabase
+                .from('profiles')
+                .insert({ id: currentUser.id, role: 'user' })
+                .select('id, role')
+                .single();
 
-        } catch (error) {
-          console.error("Error fetching user profile:", error);
+              if (!insertError) {
+                profile = newProfile;
+              } else {
+                console.warn("Failed to create profile:", insertError);
+                profile = { id: currentUser.id, role: 'user' };
+              }
+            } catch (error) {
+              console.warn("Error creating profile:", error);
+              profile = { id: currentUser.id, role: 'user' };
+            }
+          }
+
+          if (mounted) {
+            setProfile(profile as Profile);
+          }
+        }
+      } catch (error) {
+        console.error("Error in auth initialization:", error);
+        if (mounted) {
+          setUser(null);
           setProfile(null);
         }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
-      setLoading(false);
     }
 
     getInitialSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        if (!mounted) return;
+        
         if (event === 'SIGNED_OUT') {
           setUser(null);
           setProfile(null);
@@ -78,6 +126,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     );
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);
