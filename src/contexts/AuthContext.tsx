@@ -33,17 +33,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (currentUser) {
         try {
-          const { data, error } = await supabase.functions.invoke('get-user-profile', {
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          });
+          // Directly query the profiles table instead of using Edge Function
+          let { data: profile, error } = await supabase
+            .from('profiles')
+            .select('id, role')
+            .eq('id', currentUser.id)
+            .maybeSingle();
 
           if (error) throw error;
-          setProfile(data);
+
+          // If no profile exists, create one with default user role
+          if (!profile) {
+            const { data: newProfile, error: insertError } = await supabase
+              .from('profiles')
+              .insert({ id: currentUser.id, role: 'user' })
+              .select('id, role')
+              .single();
+
+            if (insertError) throw insertError;
+            profile = newProfile;
+          }
+
+          setProfile(profile as Profile);
 
         } catch (error) {
-          console.error("Error invoking get-user-profile function:", error);
+          console.error("Error fetching user profile:", error);
           setProfile(null);
         }
       }
