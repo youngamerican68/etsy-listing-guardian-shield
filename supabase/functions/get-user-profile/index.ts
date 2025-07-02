@@ -16,31 +16,70 @@ serve(async (req) => {
   }
 
   try {
-    // The rest of your function logic remains the same.
+    console.log('Function started');
+    
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new Error('No authorization header');
+    }
+
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const authHeader = req.headers.get('Authorization')!;
     const jwt = authHeader.replace('Bearer ', '');
-    const { data: { user } } = await supabaseAdmin.auth.getUser(jwt);
-    if (!user) throw new Error('User not found');
+    console.log('Getting user with JWT');
+    
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(jwt);
+    if (userError || !user) {
+      console.error('User error:', userError);
+      throw new Error('User not found');
+    }
 
-    const { data: profile, error } = await supabaseAdmin
+    console.log('User found:', user.id);
+
+    // Use maybeSingle() instead of single() to handle cases where profile doesn't exist
+    const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('id, role')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
-    if (error) throw error;
+    if (profileError) {
+      console.error('Profile error:', profileError);
+      throw profileError;
+    }
 
+    // If no profile exists, create one with default user role
+    if (!profile) {
+      console.log('No profile found, creating default profile');
+      const { data: newProfile, error: insertError } = await supabaseAdmin
+        .from('profiles')
+        .insert({ id: user.id, role: 'user' })
+        .select('id, role')
+        .single();
+
+      if (insertError) {
+        console.error('Insert error:', insertError);
+        throw insertError;
+      }
+
+      console.log('Created new profile:', newProfile);
+      return new Response(JSON.stringify(newProfile), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      });
+    }
+
+    console.log('Profile found:', profile);
     return new Response(JSON.stringify(profile), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
   } catch (err) {
-    return new Response(String(err?.message ?? err), {
+    console.error('Function error:', err);
+    return new Response(JSON.stringify({ error: String(err?.message ?? err) }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500
     });
