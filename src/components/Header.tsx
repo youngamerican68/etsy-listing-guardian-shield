@@ -1,15 +1,18 @@
 
 import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
 
 interface HeaderProps {
   isLoggedIn?: boolean;
+  isAdmin?: boolean;
   onLoginClick?: () => void;
   onDashboardClick?: () => void;
   onLogoutClick?: () => void;
 }
 
 const Header = ({ 
-  isLoggedIn = false, 
+  isLoggedIn = false,
+  isAdmin = false,
   onLoginClick, 
   onDashboardClick, 
   onLogoutClick 
@@ -39,6 +42,16 @@ const Header = ({
               <a href="#about" className="text-gray-600 hover:text-trust-700 px-3 py-2 text-sm font-medium transition-colors">
                 About
               </a>
+              {isLoggedIn && (
+                <Link to="/test-compliance" className="text-gray-600 hover:text-trust-700 px-3 py-2 text-sm font-medium transition-colors">
+                  Test Compliance
+                </Link>
+              )}
+              {isAdmin && (
+                <Link to="/admin" className="text-gray-600 hover:text-trust-700 px-3 py-2 text-sm font-medium transition-colors">
+                  Admin
+                </Link>
+              )}
             </div>
           </nav>
 

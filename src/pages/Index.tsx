@@ -11,7 +11,7 @@ import Dashboard from "@/components/Dashboard";
 import { toast } from "@/hooks/use-toast";
 
 const Index = () => {
-  const { user, loading, signOut } = useAuth();
+  const { user, loading, signOut, isAdmin } = useAuth();
   const [showDashboard, setShowDashboard] = useState(false);
   const [userTier, setUserTier] = useState<'free' | 'pro'>('free');
 
@@ -63,6 +63,7 @@ const Index = () => {
       <>
         <Header 
           isLoggedIn={!!user}
+          isAdmin={isAdmin}
           onLoginClick={() => window.location.href = '/auth'}
           onDashboardClick={() => setShowDashboard(true)}
           onLogoutClick={handleLogout}
@@ -79,6 +80,7 @@ const Index = () => {
     <div className="min-h-screen bg-white">
       <Header 
         isLoggedIn={!!user}
+        isAdmin={isAdmin}
         onLoginClick={() => window.location.href = '/auth'}
         onDashboardClick={() => setShowDashboard(true)}
         onLogoutClick={handleLogout}

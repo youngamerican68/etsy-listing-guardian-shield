@@ -9,6 +9,8 @@ import Index from "./pages/Index";
 import ProofPage from "./pages/ProofPage";
 import AuthPage from "./pages/AuthPage";
 import AdminRules from "./pages/AdminRules";
+import AdminDashboard from "./pages/AdminDashboard";
+import TestCompliance from "./pages/TestCompliance";
 import AuthTest from "./pages/AuthTest";
 import NotFound from "./pages/NotFound";
 
@@ -24,8 +26,10 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<AuthPage />} />
+            <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/rules" element={<AdminRules />} />
             <Route path="/test" element={<AuthTest />} />
+            <Route path="/test-compliance" element={<TestCompliance />} />
             <Route path="/proof/:token" element={<ProofPage />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
