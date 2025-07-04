@@ -13,13 +13,58 @@ export interface DatabaseComplianceResult {
   }>;
 }
 
+// Simple hash function for browser compatibility
+const generateContentHash = async (title: string, description: string): Promise<string> => {
+  const content = `${title.trim().toLowerCase()}|${description.trim().toLowerCase()}`;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(content);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+};
+
 export const analyzeDatabaseCompliance = async (
   title: string, 
   description: string
 ): Promise<DatabaseComplianceResult> => {
-  const fullText = `${title} ${description}`.toLowerCase();
+  const contentHash = await generateContentHash(title, description);
   
   try {
+    // First, check cache for existing result
+    const { data: cachedResult, error: cacheError } = await supabase
+      .from('compliance_cache')
+      .select('*')
+      .eq('content_hash', contentHash)
+      .gt('expires_at', new Date().toISOString())
+      .maybeSingle();
+
+    if (cachedResult && !cacheError) {
+      console.log('Cache hit for compliance analysis');
+      
+      // Update hit count
+      await supabase
+        .from('compliance_cache')
+        .update({ hit_count: cachedResult.hit_count + 1 })
+        .eq('id', cachedResult.id);
+
+      return {
+        status: cachedResult.status as 'pass' | 'warning' | 'fail',
+        flaggedTerms: cachedResult.flagged_terms || [],
+        suggestions: cachedResult.suggestions || [],
+        confidence: Number(cachedResult.confidence),
+        ruleMatches: Array.isArray(cachedResult.rule_matches) ? cachedResult.rule_matches as Array<{
+          term: string;
+          risk_level: 'high' | 'warning';
+          reason: string;
+        }> : []
+      };
+    }
+
+    console.log('Cache miss - performing fresh analysis');
+    
+    // Perform fresh analysis
+    const fullText = `${title} ${description}`.toLowerCase();
+    
     // Fetch all active compliance rules
     const { data: rules, error } = await supabase
       .from('compliance_rules')
@@ -69,13 +114,34 @@ export const analyzeDatabaseCompliance = async (
     const flaggedTerms = ruleMatches.map(match => match.term);
     const suggestions = ruleMatches.map(match => `${match.reason}: Remove or replace "${match.term}"`);
 
-    return {
+    const result: DatabaseComplianceResult = {
       status,
       flaggedTerms,
       suggestions,
       confidence,
       ruleMatches
     };
+
+    // Cache the result for future use
+    try {
+      await supabase
+        .from('compliance_cache')
+        .insert({
+          content_hash: contentHash,
+          title: title.trim(),
+          description: description.trim(),
+          status: result.status,
+          flagged_terms: result.flaggedTerms,
+          suggestions: result.suggestions,
+          confidence: result.confidence,
+          rule_matches: result.ruleMatches
+        });
+    } catch (cacheInsertError) {
+      console.warn('Failed to cache result:', cacheInsertError);
+      // Don't fail the entire analysis if caching fails
+    }
+
+    return result;
   } catch (error) {
     console.error('Database compliance analysis failed:', error);
     // Return safe fallback

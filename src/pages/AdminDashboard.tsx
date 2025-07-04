@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Users, Shield, FileText, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import CacheManagement from '@/components/dashboard/CacheManagement';
 
 interface UserProfile {
   id: string;
@@ -186,6 +187,11 @@ const AdminDashboard = () => {
             <div className="text-2xl font-bold text-green-600">Online</div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Cache Management */}
+      <div className="mb-8">
+        <CacheManagement />
       </div>
 
       {/* User Management */}

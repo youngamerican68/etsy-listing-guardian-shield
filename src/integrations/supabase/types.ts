@@ -9,6 +9,51 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      compliance_cache: {
+        Row: {
+          confidence: number
+          content_hash: string
+          created_at: string
+          description: string
+          expires_at: string
+          flagged_terms: string[] | null
+          hit_count: number
+          id: string
+          rule_matches: Json | null
+          status: string
+          suggestions: string[] | null
+          title: string
+        }
+        Insert: {
+          confidence?: number
+          content_hash: string
+          created_at?: string
+          description: string
+          expires_at?: string
+          flagged_terms?: string[] | null
+          hit_count?: number
+          id?: string
+          rule_matches?: Json | null
+          status: string
+          suggestions?: string[] | null
+          title: string
+        }
+        Update: {
+          confidence?: number
+          content_hash?: string
+          created_at?: string
+          description?: string
+          expires_at?: string
+          flagged_terms?: string[] | null
+          hit_count?: number
+          id?: string
+          rule_matches?: Json | null
+          status?: string
+          suggestions?: string[] | null
+          title?: string
+        }
+        Relationships: []
+      }
       compliance_proofs: {
         Row: {
           archived_description: string
@@ -119,6 +164,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cleanup_expired_cache: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
       get_current_user_role: {
         Args: Record<PropertyKey, never>
         Returns: string
