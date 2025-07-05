@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Users, Shield, FileText, TrendingUp } from 'lucide-react';
+import { Users, Shield, FileText, TrendingUp, BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CacheManagement from '@/components/dashboard/CacheManagement';
 
@@ -138,6 +138,12 @@ const AdminDashboard = () => {
             <Button variant="outline">
               <Shield className="w-4 h-4 mr-2" />
               Manage Rules
+            </Button>
+          </Link>
+          <Link to="/admin/analytics">
+            <Button variant="outline">
+              <BarChart3 className="w-4 h-4 mr-2" />
+              Analytics
             </Button>
           </Link>
         </div>
