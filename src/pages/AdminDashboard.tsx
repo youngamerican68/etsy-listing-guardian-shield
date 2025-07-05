@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Users, Shield, FileText, TrendingUp, BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CacheManagement from '@/components/dashboard/CacheManagement';
+import PolicyParserManager from '@/components/dashboard/PolicyParserManager';
 
 interface UserProfile {
   id: string;
@@ -193,6 +194,11 @@ const AdminDashboard = () => {
             <div className="text-2xl font-bold text-green-600">Online</div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Policy Parser */}
+      <div className="mb-8">
+        <PolicyParserManager />
       </div>
 
       {/* Cache Management */}
