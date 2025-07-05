@@ -135,6 +135,175 @@ export type Database = {
         }
         Relationships: []
       }
+      etsy_policies: {
+        Row: {
+          category: string
+          content: string
+          created_at: string
+          id: string
+          is_active: boolean
+          last_updated: string | null
+          scraped_at: string
+          title: string
+          updated_at: string
+          url: string
+          version: string | null
+        }
+        Insert: {
+          category: string
+          content: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_updated?: string | null
+          scraped_at?: string
+          title: string
+          updated_at?: string
+          url: string
+          version?: string | null
+        }
+        Update: {
+          category?: string
+          content?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_updated?: string | null
+          scraped_at?: string
+          title?: string
+          updated_at?: string
+          url?: string
+          version?: string | null
+        }
+        Relationships: []
+      }
+      policy_keywords: {
+        Row: {
+          context: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          keyword: string
+          policy_section_id: string
+          risk_level: string
+          updated_at: string
+        }
+        Insert: {
+          context?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          keyword: string
+          policy_section_id: string
+          risk_level?: string
+          updated_at?: string
+        }
+        Update: {
+          context?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          keyword?: string
+          policy_section_id?: string
+          risk_level?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "policy_keywords_policy_section_id_fkey"
+            columns: ["policy_section_id"]
+            isOneToOne: false
+            referencedRelation: "policy_sections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      policy_references: {
+        Row: {
+          created_at: string
+          id: string
+          reference_type: string
+          source_section_id: string
+          target_section_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          reference_type?: string
+          source_section_id: string
+          target_section_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          reference_type?: string
+          source_section_id?: string
+          target_section_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "policy_references_source_section_id_fkey"
+            columns: ["source_section_id"]
+            isOneToOne: false
+            referencedRelation: "policy_sections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "policy_references_target_section_id_fkey"
+            columns: ["target_section_id"]
+            isOneToOne: false
+            referencedRelation: "policy_sections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      policy_sections: {
+        Row: {
+          category: string
+          created_at: string
+          id: string
+          order_index: number
+          plain_english_summary: string | null
+          policy_id: string
+          risk_level: string
+          section_content: string
+          section_title: string
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          id?: string
+          order_index?: number
+          plain_english_summary?: string | null
+          policy_id: string
+          risk_level?: string
+          section_content: string
+          section_title: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          id?: string
+          order_index?: number
+          plain_english_summary?: string | null
+          policy_id?: string
+          risk_level?: string
+          section_content?: string
+          section_title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "policy_sections_policy_id_fkey"
+            columns: ["policy_id"]
+            isOneToOne: false
+            referencedRelation: "etsy_policies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string | null
