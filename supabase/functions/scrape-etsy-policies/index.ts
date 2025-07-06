@@ -42,8 +42,13 @@ serve(async (req) => {
         
         const response = await fetch(url, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; EtsyComplianceBot/1.0)',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
           }
         });
 
@@ -54,31 +59,48 @@ serve(async (req) => {
 
         const html = await response.text();
         
+        // Check if we got a GDPR consent page
+        if (html.includes('Your Etsy Privacy Settings') || html.includes('gdpr-single-choice-overlay')) {
+          console.warn(`Got GDPR consent page for ${category}, skipping for now`);
+          continue;
+        }
+        
         // Extract title from HTML
         const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
         const title = titleMatch ? titleMatch[1].replace(/\s*\|\s*Etsy.*$/, '').trim() : `Etsy ${category} Policy`;
 
-        // Extract main content - look for common content containers
+        // Extract main content - look for common content containers with more specific patterns
         let content = '';
         const contentPatterns = [
+          // More specific Etsy content patterns
+          /<div[^>]*class="[^"]*legal-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+          /<div[^>]*class="[^"]*policy-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+          /<div[^>]*class="[^"]*terms-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+          // Generic patterns
           /<main[^>]*>([\s\S]*?)<\/main>/i,
           /<article[^>]*>([\s\S]*?)<\/article>/i,
           /<div[^>]*class="[^"]*content[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
-          /<section[^>]*>([\s\S]*?)<\/section>/i
+          /<section[^>]*class="[^"]*policy[^"]*"[^>]*>([\s\S]*?)<\/section>/i,
+          /<section[^>]*class="[^"]*legal[^"]*"[^>]*>([\s\S]*?)<\/section>/i,
         ];
 
         for (const pattern of contentPatterns) {
           const match = html.match(pattern);
           if (match) {
             content = match[1];
+            console.log(`Found content using pattern: ${pattern.source.substring(0, 50)}...`);
             break;
           }
         }
 
-        // If no structured content found, try to extract from body
+        // If no structured content found, try to extract from body but exclude known non-content elements
         if (!content) {
           const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-          content = bodyMatch ? bodyMatch[1] : html;
+          if (bodyMatch) {
+            content = bodyMatch[1];
+          } else {
+            content = html;
+          }
         }
 
         // Clean HTML tags and normalize whitespace
@@ -88,6 +110,8 @@ serve(async (req) => {
           .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
           .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
           .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+          .replace(/<div[^>]*id="gdpr-single-choice-overlay"[^>]*>[\s\S]*?<\/div>/gi, '')
+          .replace(/<div[^>]*data-gdpr-consent-prompt[^>]*>[\s\S]*?<\/div>/gi, '')
           .replace(/<[^>]+>/g, ' ')
           .replace(/&nbsp;/g, ' ')
           .replace(/&amp;/g, '&')
@@ -98,23 +122,28 @@ serve(async (req) => {
           .replace(/\s+/g, ' ')
           .trim();
 
-        // Extract last updated date if available
-        const datePatterns = [
-          /last updated:?\s*([^.\n]+)/i,
-          /effective:?\s*([^.\n]+)/i,
-          /updated on:?\s*([^.\n]+)/i
-        ];
-        
-        let lastUpdated = undefined;
-        for (const pattern of datePatterns) {
-          const match = content.match(pattern);
-          if (match) {
-            lastUpdated = match[1].trim();
-            break;
-          }
-        }
+        // Log content length for debugging
+        console.log(`Content length for ${category}: ${content.length} characters`);
+        console.log(`First 200 chars: ${content.substring(0, 200)}`);
 
-        if (content.length > 100) { // Only add if we got substantial content
+        // Only add if we got substantial content and it doesn't look like a consent page
+        if (content.length > 100 && !content.includes('Your Etsy Privacy Settings')) {
+          // Extract last updated date if available
+          const datePatterns = [
+            /last updated:?\s*([^.\n]+)/i,
+            /effective:?\s*([^.\n]+)/i,
+            /updated on:?\s*([^.\n]+)/i
+          ];
+          
+          let lastUpdated = undefined;
+          for (const pattern of datePatterns) {
+            const match = content.match(pattern);
+            if (match) {
+              lastUpdated = match[1].trim();
+              break;
+            }
+          }
+
           scrapedPolicies.push({
             title,
             url,
@@ -123,6 +152,8 @@ serve(async (req) => {
             lastUpdated
           });
           console.log(`Successfully scraped ${category}: ${content.length} characters`);
+        } else {
+          console.warn(`Skipped ${category}: insufficient content (${content.length} chars) or consent page detected`);
         }
 
       } catch (error) {
