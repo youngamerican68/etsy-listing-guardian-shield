@@ -4,7 +4,9 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Search, Filter, FileText, AlertTriangle, Info } from 'lucide-react';
+import { Search, Filter, FileText, AlertTriangle, Info, RefreshCw } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
+import { policyParserService } from '@/services/policyParserService';
 import PolicyBrowser from '@/components/policies/PolicyBrowser';
 import PolicySearch from '@/components/policies/PolicySearch';
 import PolicyDetails from '@/components/policies/PolicyDetails';
@@ -13,6 +15,38 @@ const Policies = () => {
   const [selectedPolicyId, setSelectedPolicyId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleUpdatePolicies = async () => {
+    setIsUpdating(true);
+    
+    try {
+      const result = await policyParserService.parseAllEtsyPolicies();
+      
+      if (result.success) {
+        toast({
+          title: "Policies successfully updated!",
+          description: result.message,
+        });
+        // Trigger a page refresh to show new data
+        window.location.reload();
+      } else {
+        toast({
+          title: "Failed to update policies",
+          description: result.message,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Failed to update policies",
+        description: "Check the function logs for more details.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   const categories = [
     { id: 'all', label: 'All Policies', count: 0 },
@@ -43,6 +77,14 @@ const Policies = () => {
                 <FileText className="h-4 w-4" />
                 Policies Analyzed
               </Badge>
+              <Button
+                onClick={handleUpdatePolicies}
+                disabled={isUpdating}
+                className="flex items-center gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${isUpdating ? 'animate-spin' : ''}`} />
+                {isUpdating ? 'Analyzing...' : 'Analyze & Update Policies'}
+              </Button>
             </div>
           </div>
 
