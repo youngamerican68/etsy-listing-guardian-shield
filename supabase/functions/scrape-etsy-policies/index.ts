@@ -40,6 +40,12 @@ serve(async (req) => {
       try {
         console.log(`Scraping ${category} from ${url}`);
         
+        // Add delay between requests to avoid rate limiting
+        if (categories.indexOf(category) > 0) {
+          console.log('Waiting 2 seconds before next request...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+        
         const response = await fetch(url, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
