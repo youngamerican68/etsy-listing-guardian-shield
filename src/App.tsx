@@ -14,6 +14,7 @@ import TestCompliance from "./pages/TestCompliance";
 import NotFound from "./pages/NotFound";
 import AdminDashboard from "./pages/AdminDashboard";
 import Analytics from "./pages/Analytics";
+import Policies from "./pages/Policies";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +28,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<AuthPage />} />
+            <Route path="/policies" element={<Policies />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/rules" element={<AdminRules />} />
             <Route path="/admin/analytics" element={<Analytics />} />

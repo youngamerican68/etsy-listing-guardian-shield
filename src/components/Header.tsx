@@ -36,6 +36,9 @@ const Header = ({
               <a href="#features" className="text-gray-600 hover:text-trust-700 px-3 py-2 text-sm font-medium transition-colors">
                 Features
               </a>
+              <Link to="/policies" className="text-gray-600 hover:text-trust-700 px-3 py-2 text-sm font-medium transition-colors">
+                Policies
+              </Link>
               <a href="#pricing" className="text-gray-600 hover:text-trust-700 px-3 py-2 text-sm font-medium transition-colors">
                 Pricing
               </a>

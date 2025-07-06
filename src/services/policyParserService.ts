@@ -181,6 +181,7 @@ class PolicyParserService {
           section_title,
           category,
           risk_level,
+          plain_english_summary,
           policy_keywords (count)
         )
       `)
