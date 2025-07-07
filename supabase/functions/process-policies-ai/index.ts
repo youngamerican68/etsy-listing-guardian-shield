@@ -40,7 +40,7 @@ serve(async (req) => {
     console.log('Starting policy processing from local policies.json');
 
     // Read policies from local file
-    const policiesResponse = await fetch('https://raw.githubusercontent.com/your-username/your-repo/main/policies.json');
+    const policiesResponse = await fetch('https://raw.githubusercontent.com/youngamerican68/etsy-listing-guardian-shield/main/policies.json');
     
     if (!policiesResponse.ok) {
       throw new Error(`Failed to fetch policies.json: ${policiesResponse.status}`);
