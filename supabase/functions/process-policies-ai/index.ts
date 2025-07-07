@@ -46,8 +46,16 @@ serve(async (req) => {
       throw new Error(`Failed to fetch policies.json: ${policiesResponse.status}`);
     }
     
-    const policies = await policiesResponse.json();
+    const policiesData = await policiesResponse.json();
+    console.log('Raw policies data structure:', JSON.stringify(policiesData, null, 2).substring(0, 500));
+    
+    // Handle different possible JSON structures
+    const policies = Array.isArray(policiesData) ? policiesData : policiesData.policies || [];
     console.log(`Loaded ${policies.length} policies from file`);
+    
+    if (policies.length === 0) {
+      throw new Error('No policies found in the JSON file');
+    }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     let totalPoliciesProcessed = 0;
