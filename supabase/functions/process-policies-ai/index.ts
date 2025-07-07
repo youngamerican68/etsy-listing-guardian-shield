@@ -73,7 +73,7 @@ serve(async (req) => {
       const { data: policyData, error: policyError } = await supabase
         .from('etsy_policies')
         .upsert({
-          title: policy.title,
+          title: policy.category,
           url: policy.url,
           content: policy.content,
           category: policy.category,
@@ -134,7 +134,7 @@ Return as JSON array with this structure:
           },
           {
             role: 'user',
-            content: `Policy Title: ${policy.title}\n\nPolicy Content:\n${policy.content}`
+            content: `Policy Title: ${policy.category}\n\nPolicy Content:\n${policy.content}`
           }
         ],
         temperature: 0.3,
