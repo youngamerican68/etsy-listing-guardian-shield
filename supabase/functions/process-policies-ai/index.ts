@@ -37,11 +37,50 @@ serve(async (req) => {
   }
 
   try {
-    const { policyId, content, title } = await req.json();
-    
-    console.log(`Processing policy: ${title}`);
+    console.log('Starting policy processing from local policies.json');
 
-    // First, break down the policy into sections
+    // Read policies from local file
+    const policiesResponse = await fetch('https://raw.githubusercontent.com/your-username/your-repo/main/policies.json');
+    
+    if (!policiesResponse.ok) {
+      throw new Error(`Failed to fetch policies.json: ${policiesResponse.status}`);
+    }
+    
+    const policies = await policiesResponse.json();
+    console.log(`Loaded ${policies.length} policies from file`);
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    let totalPoliciesProcessed = 0;
+    let totalSectionsCreated = 0;
+    let totalKeywordsExtracted = 0;
+
+    // Process each policy
+    for (const policy of policies) {
+      console.log(`Processing policy: ${policy.title}`);
+
+      // First, store the policy in the database
+      const { data: policyData, error: policyError } = await supabase
+        .from('etsy_policies')
+        .upsert({
+          title: policy.title,
+          url: policy.url,
+          content: policy.content,
+          category: policy.category,
+          last_updated: policy.lastUpdated ? new Date(policy.lastUpdated).toISOString() : null,
+          scraped_at: new Date().toISOString(),
+          is_active: true
+        }, {
+          onConflict: 'url'
+        })
+        .select()
+        .single();
+
+      if (policyError) {
+        console.error(`Error storing policy ${policy.title}:`, policyError);
+        continue;
+      }
+
+      // Process the policy with AI - break down into sections
     const sectionsResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -84,7 +123,7 @@ Return as JSON array with this structure:
           },
           {
             role: 'user',
-            content: `Policy Title: ${title}\n\nPolicy Content:\n${content}`
+            content: `Policy Title: ${policy.title}\n\nPolicy Content:\n${policy.content}`
           }
         ],
         temperature: 0.3,
@@ -108,62 +147,72 @@ Return as JSON array with this structure:
       throw new Error('Failed to parse AI response');
     }
 
-    // Store sections in database
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    const processedSections = [];
+      // Store sections in database for this policy
+      const processedSections = [];
 
-    for (const [index, section] of parsedSections.sections.entries()) {
-      // Insert policy section
-      const { data: sectionData, error: sectionError } = await supabase
-        .from('policy_sections')
-        .insert({
-          policy_id: policyId,
-          section_title: section.section_title,
-          section_content: section.section_content,
-          plain_english_summary: section.plain_english_summary,
-          category: section.category,
-          risk_level: section.risk_level,
-          order_index: index
-        })
-        .select()
-        .single();
+      for (const [index, section] of parsedSections.sections.entries()) {
+        // Insert policy section
+        const { data: sectionData, error: sectionError } = await supabase
+          .from('policy_sections')
+          .insert({
+            policy_id: policyData.id,
+            section_title: section.section_title,
+            section_content: section.section_content,
+            plain_english_summary: section.plain_english_summary,
+            category: section.category,
+            risk_level: section.risk_level,
+            order_index: index
+          })
+          .select()
+          .single();
 
-      if (sectionError) {
-        console.error('Error inserting section:', sectionError);
-        continue;
-      }
-
-      // Insert keywords for this section
-      if (section.keywords && section.keywords.length > 0) {
-        const keywordInserts = section.keywords.map(kw => ({
-          policy_section_id: sectionData.id,
-          keyword: kw.keyword.toLowerCase(),
-          risk_level: kw.risk_level,
-          context: kw.context
-        }));
-
-        const { error: keywordError } = await supabase
-          .from('policy_keywords')
-          .insert(keywordInserts);
-
-        if (keywordError) {
-          console.error('Error inserting keywords:', keywordError);
+        if (sectionError) {
+          console.error('Error inserting section:', sectionError);
+          continue;
         }
+
+        // Insert keywords for this section
+        if (section.keywords && section.keywords.length > 0) {
+          const keywordInserts = section.keywords.map(kw => ({
+            policy_section_id: sectionData.id,
+            keyword: kw.keyword.toLowerCase(),
+            risk_level: kw.risk_level,
+            context: kw.context
+          }));
+
+          const { error: keywordError } = await supabase
+            .from('policy_keywords')
+            .insert(keywordInserts);
+
+          if (keywordError) {
+            console.error('Error inserting keywords:', keywordError);
+          }
+        }
+
+        processedSections.push({
+          ...section,
+          id: sectionData.id,
+          keywords_count: section.keywords?.length || 0
+        });
       }
 
-      processedSections.push({
-        ...section,
-        id: sectionData.id,
-        keywords_count: section.keywords?.length || 0
-      });
+      console.log(`Successfully processed ${processedSections.length} sections for policy ${policy.title}`);
+      
+      totalPoliciesProcessed++;
+      totalSectionsCreated += processedSections.length;
+      
+      // Count keywords extracted
+      for (const section of processedSections) {
+        totalKeywordsExtracted += section.keywords_count || 0;
+      }
     }
-
-    console.log(`Successfully processed ${processedSections.length} sections for policy ${title}`);
 
     return new Response(JSON.stringify({ 
       success: true,
-      sections_processed: processedSections.length,
-      sections: processedSections
+      policies_processed: totalPoliciesProcessed,
+      sections_created: totalSectionsCreated,
+      keywords_extracted: totalKeywordsExtracted,
+      message: `Successfully processed ${totalPoliciesProcessed} policies, created ${totalSectionsCreated} sections, and extracted ${totalKeywordsExtracted} keywords.`
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

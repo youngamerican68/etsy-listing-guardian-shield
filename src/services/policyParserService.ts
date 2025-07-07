@@ -1,10 +1,8 @@
 import { toast } from '@/hooks/use-toast';
-import { etsyScrapingService } from './etsyScrapingService';
 import { policyProcessingService, PolicyParserResult } from './policyProcessingService';
 import { policyDataService } from './policyDataService';
 
 // Re-export types for backward compatibility
-export type { ScrapedPolicy } from './etsyScrapingService';
 export type { PolicyParserResult } from './policyProcessingService';
 
 class PolicyParserService {
@@ -12,23 +10,11 @@ class PolicyParserService {
     try {
       toast({
         title: "Starting Policy Parsing",
-        description: "Scraping and processing Etsy's terms of service...",
+        description: "Processing Etsy's terms of service from local file...",
       });
 
-      // Step 1: Scrape all policies
-      const policies = await etsyScrapingService.scrapeEtsyPolicies();
-      
-      if (policies.length === 0) {
-        throw new Error('No policies were successfully scraped');
-      }
-
-      toast({
-        title: "Scraping Complete",
-        description: `Found ${policies.length} policies. Processing with AI...`,
-      });
-
-      // Step 2: Process with AI
-      const result = await policyProcessingService.processScrapedPolicies(policies);
+      // Process policies from local file with AI
+      const result = await policyProcessingService.processLocalPolicies();
 
       if (result.success) {
         toast({

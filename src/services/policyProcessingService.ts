@@ -1,5 +1,4 @@
 import { supabase } from '@/integrations/supabase/client';
-import { ScrapedPolicy } from './etsyScrapingService';
 
 export interface PolicyParserResult {
   success: boolean;
@@ -10,76 +9,50 @@ export interface PolicyParserResult {
 }
 
 export class PolicyProcessingService {
-  async processScrapedPolicies(policies: ScrapedPolicy[]): Promise<PolicyParserResult> {
-    let policiesProcessed = 0;
-    let sectionsCreated = 0;
-    let keywordsExtracted = 0;
-
+  async processLocalPolicies(): Promise<PolicyParserResult> {
     try {
-      for (const policy of policies) {
-        // First, store the policy in the database
-        const { data: policyData, error: policyError } = await supabase
-          .from('etsy_policies')
-          .upsert({
-            title: policy.title,
-            url: policy.url,
-            content: policy.content,
-            category: policy.category,
-            last_updated: policy.lastUpdated ? new Date(policy.lastUpdated).toISOString() : null,
-            scraped_at: new Date().toISOString(),
-            is_active: true
-          }, {
-            onConflict: 'url'
-          })
-          .select()
-          .single();
+      // Process all policies from the local policies.json file using AI
+      const { data: aiData, error: aiError } = await supabase.functions.invoke('process-policies-ai', {
+        body: {}
+      });
 
-        if (policyError) {
-          console.error(`Error storing policy ${policy.title}:`, policyError);
-          continue;
-        }
-
-        // Process the policy with AI
-        const { data: aiData, error: aiError } = await supabase.functions.invoke('process-policies-ai', {
-          body: {
-            policyId: policyData.id,
-            content: policy.content,
-            title: policy.title
-          }
-        });
-
-        if (aiError) {
-          console.error(`Error processing policy ${policy.title} with AI:`, aiError);
-          continue;
-        }
-
-        if (aiData.success) {
-          policiesProcessed++;
-          sectionsCreated += aiData.sections_processed;
-          
-          // Count keywords extracted
-          for (const section of aiData.sections) {
-            keywordsExtracted += section.keywords_count || 0;
-          }
-        }
+      if (aiError) {
+        console.error('Error processing policies with AI:', aiError);
+        return {
+          success: false,
+          message: `Processing failed: ${aiError.message}`,
+          policiesProcessed: 0,
+          sectionsCreated: 0,
+          keywordsExtracted: 0
+        };
       }
 
-      return {
-        success: true,
-        message: `Successfully processed ${policiesProcessed} policies, created ${sectionsCreated} sections, and extracted ${keywordsExtracted} keywords.`,
-        policiesProcessed,
-        sectionsCreated,
-        keywordsExtracted
-      };
+      if (aiData.success) {
+        return {
+          success: true,
+          message: aiData.message,
+          policiesProcessed: aiData.policies_processed,
+          sectionsCreated: aiData.sections_created,
+          keywordsExtracted: aiData.keywords_extracted
+        };
+      } else {
+        return {
+          success: false,
+          message: aiData.error || 'Processing failed',
+          policiesProcessed: 0,
+          sectionsCreated: 0,
+          keywordsExtracted: 0
+        };
+      }
 
     } catch (error) {
-      console.error('Error processing scraped policies:', error);
+      console.error('Error processing local policies:', error);
       return {
         success: false,
         message: `Processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        policiesProcessed,
-        sectionsCreated,
-        keywordsExtracted
+        policiesProcessed: 0,
+        sectionsCreated: 0,
+        keywordsExtracted: 0
       };
     }
   }
