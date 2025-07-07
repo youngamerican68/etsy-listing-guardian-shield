@@ -67,7 +67,7 @@ serve(async (req) => {
     
     for (const policy of policies) {
       console.log(`Processing policy object:`, typeof policy, policy);
-      console.log(`Processing policy: ${policy?.title}`);
+      console.log(`Processing policy: ${policy?.category}`);
 
       // First, store the policy in the database
       const { data: policyData, error: policyError } = await supabase
@@ -87,7 +87,7 @@ serve(async (req) => {
         .single();
 
       if (policyError) {
-        console.error(`Error storing policy ${policy.title}:`, policyError);
+        console.error(`Error storing policy ${policy.category}:`, policyError);
         continue;
       }
 
@@ -207,7 +207,7 @@ Return as JSON array with this structure:
         });
       }
 
-      console.log(`Successfully processed ${processedSections.length} sections for policy ${policy.title}`);
+      console.log(`Successfully processed ${processedSections.length} sections for policy ${policy.category}`);
       
       totalPoliciesProcessed++;
       totalSectionsCreated += processedSections.length;
