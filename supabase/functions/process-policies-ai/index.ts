@@ -63,8 +63,11 @@ serve(async (req) => {
     let totalKeywordsExtracted = 0;
 
     // Process each policy
+    console.log('First policy sample:', JSON.stringify(policies[0], null, 2));
+    
     for (const policy of policies) {
-      console.log(`Processing policy: ${policy.title}`);
+      console.log(`Processing policy object:`, typeof policy, policy);
+      console.log(`Processing policy: ${policy?.title}`);
 
       // First, store the policy in the database
       const { data: policyData, error: policyError } = await supabase
