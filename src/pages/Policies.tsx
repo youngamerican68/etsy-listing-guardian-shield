@@ -25,25 +25,59 @@ const Policies = () => {
       
       if (result.success) {
         toast({
-          title: "Policies successfully updated!",
-          description: result.message,
+          title: "Policy analysis started!",
+          description: "Background processing has begun. The page will refresh when complete.",
         });
-        // Trigger a page refresh to show new data
-        window.location.reload();
+        
+        // Set up polling to check job status
+        const jobId = result.jobId;
+        if (jobId) {
+          const pollInterval = setInterval(async () => {
+            try {
+              const { policyJobService } = await import('@/services/policyJobService');
+              const job = await policyJobService.getJobStatus(jobId);
+              
+              if (job?.status === 'completed') {
+                clearInterval(pollInterval);
+                toast({
+                  title: "Policies successfully updated!",
+                  description: `Processed ${job.policies_processed} policies successfully.`,
+                });
+                window.location.reload();
+              } else if (job?.status === 'failed') {
+                clearInterval(pollInterval);
+                toast({
+                  title: "Policy analysis failed",
+                  description: job.error_message || "The analysis job failed",
+                  variant: "destructive",
+                });
+                setIsUpdating(false);
+              }
+            } catch (error) {
+              console.error('Error polling job status:', error);
+            }
+          }, 3000); // Poll every 3 seconds
+          
+          // Clean up polling after 10 minutes max
+          setTimeout(() => {
+            clearInterval(pollInterval);
+            setIsUpdating(false);
+          }, 600000);
+        }
       } else {
         toast({
-          title: "Failed to update policies",
+          title: "Failed to start policy analysis",
           description: result.message,
           variant: "destructive",
         });
+        setIsUpdating(false);
       }
     } catch (error) {
       toast({
-        title: "Failed to update policies",
+        title: "Failed to start policy analysis",
         description: "Check the function logs for more details.",
         variant: "destructive",
       });
-    } finally {
       setIsUpdating(false);
     }
   };

@@ -182,6 +182,54 @@ export type Database = {
         }
         Relationships: []
       }
+      policy_analysis_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          error_message: string | null
+          id: string
+          keywords_extracted: number | null
+          policies_processed: number | null
+          progress_message: string | null
+          sections_created: number | null
+          started_at: string | null
+          status: string
+          total_policies: number | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          keywords_extracted?: number | null
+          policies_processed?: number | null
+          progress_message?: string | null
+          sections_created?: number | null
+          started_at?: string | null
+          status?: string
+          total_policies?: number | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          keywords_extracted?: number | null
+          policies_processed?: number | null
+          progress_message?: string | null
+          sections_created?: number | null
+          started_at?: string | null
+          status?: string
+          total_policies?: number | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       policy_keywords: {
         Row: {
           context: string | null

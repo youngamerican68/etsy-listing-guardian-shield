@@ -1,29 +1,35 @@
 import { toast } from '@/hooks/use-toast';
-import { policyProcessingService, PolicyParserResult } from './policyProcessingService';
 import { policyDataService } from './policyDataService';
+import { policyJobService, StartJobResult } from './policyJobService';
 
-// Re-export types for backward compatibility
-export type { PolicyParserResult } from './policyProcessingService';
+// Legacy interface for backward compatibility
+export interface PolicyParserResult {
+  success: boolean;
+  message: string;
+  policiesProcessed: number;
+  sectionsCreated: number;
+  keywordsExtracted: number;
+}
 
 class PolicyParserService {
-  async parseAllEtsyPolicies(): Promise<PolicyParserResult> {
+  async parseAllEtsyPolicies(): Promise<StartJobResult> {
     try {
       toast({
-        title: "Starting Policy Parsing",
-        description: "Processing Etsy's terms of service from local file...",
+        title: "Starting Policy Analysis",
+        description: "Queuing analysis job...",
       });
 
-      // Process policies from local file with AI
-      const result = await policyProcessingService.processLocalPolicies();
+      // Start async policy analysis job
+      const result = await policyJobService.startPolicyAnalysis();
 
       if (result.success) {
         toast({
-          title: "Policy Parsing Complete",
-          description: result.message,
+          title: "Policy Analysis Started",
+          description: "Background processing started. You can monitor progress below.",
         });
       } else {
         toast({
-          title: "Policy Parsing Failed",
+          title: "Failed to Start Analysis",
           description: result.message,
           variant: "destructive",
         });
@@ -35,17 +41,14 @@ class PolicyParserService {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       
       toast({
-        title: "Policy Parsing Failed",
+        title: "Failed to Start Analysis",
         description: errorMessage,
         variant: "destructive",
       });
 
       return {
         success: false,
-        message: errorMessage,
-        policiesProcessed: 0,
-        sectionsCreated: 0,
-        keywordsExtracted: 0
+        message: errorMessage
       };
     }
   }

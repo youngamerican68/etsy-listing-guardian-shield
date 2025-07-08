@@ -250,7 +250,28 @@ serve(async (req) => {
   }
 
   try {
-    console.log('Starting policy processing from local policies.json');
+    const { jobId } = await req.json();
+    
+    if (!jobId) {
+      return new Response(JSON.stringify({ error: 'Job ID is required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    
+    // Update job status to running
+    await supabase
+      .from('policy_analysis_jobs')
+      .update({
+        status: 'running',
+        progress_message: 'Starting policy processing',
+        started_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+
+    console.log(`Starting policy processing for job: ${jobId}`);
 
     // Read policies from local file
     const policiesResponse = await fetch('https://raw.githubusercontent.com/youngamerican68/etsy-listing-guardian-shield/main/policies.json');
@@ -270,10 +291,18 @@ serve(async (req) => {
       throw new Error('No policies found in the JSON file');
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
     let totalPoliciesProcessed = 0;
     let totalSectionsCreated = 0;
     let totalKeywordsExtracted = 0;
+
+    // Update job progress
+    await supabase
+      .from('policy_analysis_jobs')
+      .update({
+        progress_message: `Processing ${policies.length} policies`,
+        total_policies: policies.length
+      })
+      .eq('id', jobId);
 
     // Process each policy
     console.log('First policy sample:', JSON.stringify(policies[0], null, 2));
@@ -281,6 +310,15 @@ serve(async (req) => {
     for (const policy of policies) {
       console.log(`Processing policy object:`, typeof policy, policy);
       console.log(`Processing policy: ${policy?.category}`);
+
+      // Update progress
+      await supabase
+        .from('policy_analysis_jobs')
+        .update({
+          progress_message: `Processing policy: ${policy.category}`,
+          policies_processed: totalPoliciesProcessed
+        })
+        .eq('id', jobId);
 
       // First, store the policy in the database
       const { data: policyData, error: policyError } = await supabase
@@ -365,7 +403,33 @@ serve(async (req) => {
       for (const section of processedSections) {
         totalKeywordsExtracted += section.keywords_count || 0;
       }
+
+      // Update job progress after each policy
+      await supabase
+        .from('policy_analysis_jobs')
+        .update({
+          policies_processed: totalPoliciesProcessed,
+          sections_created: totalSectionsCreated,
+          keywords_extracted: totalKeywordsExtracted,
+          progress_message: `Completed ${totalPoliciesProcessed}/${policies.length} policies`
+        })
+        .eq('id', jobId);
     }
+
+    // Mark job as completed
+    await supabase
+      .from('policy_analysis_jobs')
+      .update({
+        status: 'completed',
+        policies_processed: totalPoliciesProcessed,
+        sections_created: totalSectionsCreated,
+        keywords_extracted: totalKeywordsExtracted,
+        progress_message: `Successfully processed all ${totalPoliciesProcessed} policies`,
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+
+    console.log(`Job ${jobId} completed successfully`);
 
     return new Response(JSON.stringify({ 
       success: true,
@@ -379,6 +443,21 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Error in process-policies-ai function:', error);
+    
+    // Mark job as failed if we have jobId
+    const { jobId } = await req.json().catch(() => ({}));
+    if (jobId) {
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+      await supabase
+        .from('policy_analysis_jobs')
+        .update({
+          status: 'failed',
+          error_message: error.message,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
+    }
+
     return new Response(JSON.stringify({ 
       error: error.message,
       success: false 
