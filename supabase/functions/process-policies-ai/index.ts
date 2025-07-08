@@ -53,35 +53,84 @@ function repairJsonString(jsonStr: string): string {
   return repaired;
 }
 
-// Function to process policy with AI with retry mechanism
-async function processWithAIRetry(policy: any, openAIApiKey: string, maxRetries = 3): Promise<any> {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`AI processing attempt ${attempt} for policy: ${policy.category}`);
+// Function to split policy content into smaller, manageable chunks
+function splitPolicyIntoChunks(content: string, maxChunkSize = 2000): string[] {
+  // First try to split by clear section headers (numbered sections)
+  let sections = content.split(/(?=\n\s*\d+\.\s+[A-Z])/);
+  
+  // If no numbered sections, try other common patterns
+  if (sections.length === 1) {
+    sections = content.split(/(?=\n\s*[A-Z][A-Z\s]+\n)|(?=\n\s*[A-Z][^.]*:\s*\n)/);
+  }
+  
+  // If still no good splits, split by double newlines
+  if (sections.length === 1) {
+    sections = content.split(/\n\s*\n\s*(?=[A-Z])/);
+  }
+  
+  const chunks = [];
+  
+  for (const section of sections) {
+    const trimmedSection = section.trim();
+    if (!trimmedSection) continue;
+    
+    if (trimmedSection.length <= maxChunkSize) {
+      chunks.push(trimmedSection);
+    } else {
+      // Split large sections further by paragraphs
+      const paragraphs = trimmedSection.split(/\n\s*\n/);
+      let currentChunk = '';
       
-      const sectionsResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openAIApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4.1-2025-04-14',
-          messages: [
-            {
-              role: 'system',
-              content: `You are an expert at analyzing Etsy's Terms of Service and policies. Break down the given policy text into logical sections that cover specific rules or topics. For each section, provide:
+      for (const paragraph of paragraphs) {
+        if (currentChunk.length + paragraph.length > maxChunkSize && currentChunk.length > 0) {
+          chunks.push(currentChunk.trim());
+          currentChunk = paragraph;
+        } else {
+          currentChunk += (currentChunk ? '\n\n' : '') + paragraph;
+        }
+      }
+      
+      if (currentChunk.trim()) {
+        chunks.push(currentChunk.trim());
+      }
+    }
+  }
+  
+  return chunks.length > 0 ? chunks : [content.substring(0, maxChunkSize)];
+}
 
-1. A clear section title
+// Function to process a single chunk with AI
+async function processChunkWithAI(chunk: string, chunkIndex: number, policyCategory: string, openAIApiKey: string): Promise<any> {
+  console.log(`Processing chunk ${chunkIndex + 1} for policy: ${policyCategory}`);
+  
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${openAIApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-4.1-2025-04-14',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert at analyzing Etsy's Terms of Service and policies. Analyze the given policy text section and extract structured information.
+
+For each distinct rule or topic in the text, create a section with:
+1. A clear, descriptive section title
 2. The exact content/text for that section
 3. A plain English summary (2-3 sentences max)
 4. The category (account_integrity, intellectual_property, prohibited_items, handmade_reselling, fees_payments, or community_conduct)
 5. Risk level (low, medium, high, critical) based on potential consequences for sellers
-6. Extract 3-5 key prohibited terms/keywords with risk levels and context
+6. Extract 2-4 key prohibited terms/keywords with risk levels and context
 
-IMPORTANT: You must respond with a single, perfectly valid JSON object and nothing else. Ensure all properties and array elements are correctly formatted and separated by commas.
+CRITICAL: You must respond with ONLY a valid JSON object. No other text or formatting.
 
-Return as JSON array with this structure:
+Example:
+Input: "Policy Title: Handmade\n\nContent: All items on Etsy must be handmade by the seller..."
+Output: { "sections": [ { "section_title": "Handmade Requirement", "section_content": "All items on Etsy must be handmade by the seller...", "plain_english_summary": "Sellers must personally create all items they list.", "category": "handmade_reselling", "risk_level": "high", "keywords": [{"keyword": "handmade", "risk_level": "high", "context": "Items must be personally made by seller"}] } ] }
+
+Return JSON with this exact structure:
 {
   "sections": [
     {
@@ -100,68 +149,93 @@ Return as JSON array with this structure:
     }
   ]
 }`
-            },
-            {
-              role: 'user',
-              content: `Policy Title: ${policy.category}\n\nPolicy Content:\n${policy.content}`
-            }
-          ],
-          temperature: 0.3,
-          max_tokens: 4000
-        }),
-      });
-
-      if (!sectionsResponse.ok) {
-        throw new Error(`OpenAI API error: ${sectionsResponse.status}`);
-      }
-
-      const sectionsData = await sectionsResponse.json();
-      const aiResponse = sectionsData.choices[0].message.content;
-      
-      // Try to parse the response
-      let parsedSections;
-      try {
-        // First attempt: direct parsing
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-        const jsonStr = jsonMatch ? jsonMatch[0] : aiResponse;
-        parsedSections = JSON.parse(jsonStr);
-      } catch (parseError) {
-        console.log(`JSON parse failed on attempt ${attempt}, trying repair...`);
-        
-        // Second attempt: repair and parse
-        try {
-          const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-          const jsonStr = jsonMatch ? jsonMatch[0] : aiResponse;
-          const repairedJson = repairJsonString(jsonStr);
-          parsedSections = JSON.parse(repairedJson);
-        } catch (repairError) {
-          if (attempt === maxRetries) {
-            console.error('Final attempt failed. Original response:', aiResponse);
-            throw new Error(`Failed to parse AI response after ${maxRetries} attempts: ${repairError.message}`);
-          }
-          console.log(`Repair failed on attempt ${attempt}, retrying...`);
-          continue;
+        },
+        {
+          role: 'user',
+          content: `Policy Title: ${policyCategory}\n\nPolicy Content:\n${chunk}`
         }
+      ],
+      temperature: 0.2,
+      max_tokens: 3000,
+      response_format: { type: "json_object" }
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+// Function to process policy with AI with retry mechanism and chunking
+async function processWithAIRetry(policy: any, openAIApiKey: string, maxRetries = 3): Promise<any> {
+  console.log(`Starting chunked processing for policy: ${policy.category}`);
+  
+  // Split the policy content into smaller chunks
+  const chunks = splitPolicyIntoChunks(policy.content);
+  console.log(`Split policy into ${chunks.length} chunks`);
+  
+  const allSections = [];
+  
+  // Process each chunk
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+    const chunk = chunks[chunkIndex];
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`AI processing attempt ${attempt} for chunk ${chunkIndex + 1}/${chunks.length} of policy: ${policy.category}`);
+        
+        const aiResponse = await processChunkWithAI(chunk, chunkIndex, policy.category, openAIApiKey);
+        
+        // Try to parse the response
+        let parsedSections;
+        try {
+          // First attempt: direct parsing
+          parsedSections = JSON.parse(aiResponse);
+        } catch (parseError) {
+          console.log(`JSON parse failed on attempt ${attempt} for chunk ${chunkIndex + 1}, trying repair...`);
+          
+          // Second attempt: repair and parse
+          try {
+            const repairedJson = repairJsonString(aiResponse);
+            parsedSections = JSON.parse(repairedJson);
+          } catch (repairError) {
+            if (attempt === maxRetries) {
+              console.error(`Final attempt failed for chunk ${chunkIndex + 1}. Original response:`, aiResponse);
+              throw new Error(`Failed to parse AI response after ${maxRetries} attempts: ${repairError.message}`);
+            }
+            console.log(`Repair failed on attempt ${attempt} for chunk ${chunkIndex + 1}, retrying...`);
+            continue;
+          }
+        }
+        
+        // Validate the structure
+        if (!parsedSections.sections || !Array.isArray(parsedSections.sections)) {
+          throw new Error(`Invalid response structure for chunk ${chunkIndex + 1}: missing sections array`);
+        }
+        
+        console.log(`Successfully parsed AI response for chunk ${chunkIndex + 1} on attempt ${attempt}`);
+        allSections.push(...parsedSections.sections);
+        break; // Success, move to next chunk
+        
+      } catch (error) {
+        if (attempt === maxRetries) {
+          console.error(`All attempts failed for chunk ${chunkIndex + 1}:`, error.message);
+          // Continue with next chunk instead of failing completely
+          break;
+        }
+        console.log(`Attempt ${attempt} failed for chunk ${chunkIndex + 1}, retrying: ${error.message}`);
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
       }
-      
-      // Validate the structure
-      if (!parsedSections.sections || !Array.isArray(parsedSections.sections)) {
-        throw new Error('Invalid response structure: missing sections array');
-      }
-      
-      console.log(`Successfully parsed AI response on attempt ${attempt}`);
-      return parsedSections;
-      
-    } catch (error) {
-      if (attempt === maxRetries) {
-        throw error;
-      }
-      console.log(`Attempt ${attempt} failed, retrying: ${error.message}`);
-      // Wait a bit before retrying
-      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
     }
   }
+  
+  return { sections: allSections };
 }
+
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
