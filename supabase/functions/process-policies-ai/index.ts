@@ -24,6 +24,145 @@ interface PolicySection {
   }>;
 }
 
+// Helper function to repair common JSON syntax errors
+function repairJsonString(jsonStr: string): string {
+  let repaired = jsonStr;
+  
+  // Remove any leading/trailing whitespace and non-JSON characters
+  repaired = repaired.trim();
+  
+  // Find JSON object boundaries
+  const startIndex = repaired.indexOf('{');
+  const lastIndex = repaired.lastIndexOf('}');
+  if (startIndex !== -1 && lastIndex !== -1) {
+    repaired = repaired.substring(startIndex, lastIndex + 1);
+  }
+  
+  // Fix missing commas between object properties
+  repaired = repaired.replace(/}(\s*)"/g, '},$1"');
+  repaired = repaired.replace(/](\s*)"/g, '],$1"');
+  repaired = repaired.replace(/"(\s*)\{/g, '",$1{');
+  repaired = repaired.replace(/"(\s*)\[/g, '",$1[');
+  
+  // Fix missing commas in arrays
+  repaired = repaired.replace(/}(\s*)\{/g, '},$1{');
+  
+  // Fix trailing commas (remove them)
+  repaired = repaired.replace(/,(\s*)[}\]]/g, '$1$2');
+  
+  return repaired;
+}
+
+// Function to process policy with AI with retry mechanism
+async function processWithAIRetry(policy: any, openAIApiKey: string, maxRetries = 3): Promise<any> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`AI processing attempt ${attempt} for policy: ${policy.category}`);
+      
+      const sectionsResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openAIApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4.1-2025-04-14',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert at analyzing Etsy's Terms of Service and policies. Break down the given policy text into logical sections that cover specific rules or topics. For each section, provide:
+
+1. A clear section title
+2. The exact content/text for that section
+3. A plain English summary (2-3 sentences max)
+4. The category (account_integrity, intellectual_property, prohibited_items, handmade_reselling, fees_payments, or community_conduct)
+5. Risk level (low, medium, high, critical) based on potential consequences for sellers
+6. Extract 3-5 key prohibited terms/keywords with risk levels and context
+
+IMPORTANT: You must respond with a single, perfectly valid JSON object and nothing else. Ensure all properties and array elements are correctly formatted and separated by commas.
+
+Return as JSON array with this structure:
+{
+  "sections": [
+    {
+      "section_title": "Clear descriptive title",
+      "section_content": "Exact policy text",
+      "plain_english_summary": "Simple explanation",
+      "category": "category_name",
+      "risk_level": "risk_level",
+      "keywords": [
+        {
+          "keyword": "specific term",
+          "risk_level": "risk_level", 
+          "context": "why this term is problematic"
+        }
+      ]
+    }
+  ]
+}`
+            },
+            {
+              role: 'user',
+              content: `Policy Title: ${policy.category}\n\nPolicy Content:\n${policy.content}`
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 4000
+        }),
+      });
+
+      if (!sectionsResponse.ok) {
+        throw new Error(`OpenAI API error: ${sectionsResponse.status}`);
+      }
+
+      const sectionsData = await sectionsResponse.json();
+      const aiResponse = sectionsData.choices[0].message.content;
+      
+      // Try to parse the response
+      let parsedSections;
+      try {
+        // First attempt: direct parsing
+        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+        const jsonStr = jsonMatch ? jsonMatch[0] : aiResponse;
+        parsedSections = JSON.parse(jsonStr);
+      } catch (parseError) {
+        console.log(`JSON parse failed on attempt ${attempt}, trying repair...`);
+        
+        // Second attempt: repair and parse
+        try {
+          const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+          const jsonStr = jsonMatch ? jsonMatch[0] : aiResponse;
+          const repairedJson = repairJsonString(jsonStr);
+          parsedSections = JSON.parse(repairedJson);
+        } catch (repairError) {
+          if (attempt === maxRetries) {
+            console.error('Final attempt failed. Original response:', aiResponse);
+            throw new Error(`Failed to parse AI response after ${maxRetries} attempts: ${repairError.message}`);
+          }
+          console.log(`Repair failed on attempt ${attempt}, retrying...`);
+          continue;
+        }
+      }
+      
+      // Validate the structure
+      if (!parsedSections.sections || !Array.isArray(parsedSections.sections)) {
+        throw new Error('Invalid response structure: missing sections array');
+      }
+      
+      console.log(`Successfully parsed AI response on attempt ${attempt}`);
+      return parsedSections;
+      
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      console.log(`Attempt ${attempt} failed, retrying: ${error.message}`);
+      // Wait a bit before retrying
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -91,72 +230,8 @@ serve(async (req) => {
         continue;
       }
 
-      // Process the policy with AI - break down into sections
-    const sectionsResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openAIApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4.1-2025-04-14',
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert at analyzing Etsy's Terms of Service and policies. Break down the given policy text into logical sections that cover specific rules or topics. For each section, provide:
-
-1. A clear section title
-2. The exact content/text for that section
-3. A plain English summary (2-3 sentences max)
-4. The category (account_integrity, intellectual_property, prohibited_items, handmade_reselling, fees_payments, or community_conduct)
-5. Risk level (low, medium, high, critical) based on potential consequences for sellers
-6. Extract 3-5 key prohibited terms/keywords with risk levels and context
-
-Return as JSON array with this structure:
-{
-  "sections": [
-    {
-      "section_title": "Clear descriptive title",
-      "section_content": "Exact policy text",
-      "plain_english_summary": "Simple explanation",
-      "category": "category_name",
-      "risk_level": "risk_level",
-      "keywords": [
-        {
-          "keyword": "specific term",
-          "risk_level": "risk_level", 
-          "context": "why this term is problematic"
-        }
-      ]
-    }
-  ]
-}`
-          },
-          {
-            role: 'user',
-            content: `Policy Title: ${policy.category}\n\nPolicy Content:\n${policy.content}`
-          }
-        ],
-        temperature: 0.3,
-        max_tokens: 4000
-      }),
-    });
-
-    if (!sectionsResponse.ok) {
-      throw new Error(`OpenAI API error: ${sectionsResponse.status}`);
-    }
-
-    const sectionsData = await sectionsResponse.json();
-    const aiResponse = sectionsData.choices[0].message.content;
-    
-    let parsedSections;
-    try {
-      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-      parsedSections = JSON.parse(jsonMatch ? jsonMatch[0] : aiResponse);
-    } catch (error) {
-      console.error('Error parsing AI response:', error);
-      throw new Error('Failed to parse AI response');
-    }
+      // Process the policy with AI using retry mechanism
+      const parsedSections = await processWithAIRetry(policy, openAIApiKey);
 
       // Store sections in database for this policy
       const processedSections = [];
