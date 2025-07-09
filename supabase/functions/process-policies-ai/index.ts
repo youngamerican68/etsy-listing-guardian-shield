@@ -169,7 +169,103 @@ Return JSON with this exact structure:
   return data.choices[0].message.content;
 }
 
-// Function to process policy with AI with retry mechanism and chunking
+// Function to process policy with AI with retry mechanism and chunking (stateful version)
+async function processWithAIRetryStateful(policy: any, openAIApiKey: string, policyId: string, supabase: any, maxRetries = 3): Promise<any> {
+  console.log(`Starting stateful chunked processing for policy: ${policy.category}`);
+  
+  // Split the policy content into smaller chunks
+  const chunks = splitPolicyIntoChunks(policy.content);
+  console.log(`Split policy into ${chunks.length} chunks`);
+  
+  const allSections = [];
+  
+  // Process each chunk
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+    const chunk = chunks[chunkIndex];
+    
+    // Process chunk with AI to get potential sections for checking
+    let chunkSections = [];
+    let shouldProcessChunk = false;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`AI processing attempt ${attempt} for chunk ${chunkIndex + 1}/${chunks.length} of policy: ${policy.category}`);
+        
+        const aiResponse = await processChunkWithAI(chunk, chunkIndex, policy.category, openAIApiKey);
+        
+        // Try to parse the response
+        let parsedSections;
+        try {
+          // First attempt: direct parsing
+          parsedSections = JSON.parse(aiResponse);
+        } catch (parseError) {
+          console.log(`JSON parse failed on attempt ${attempt} for chunk ${chunkIndex + 1}, trying repair...`);
+          
+          // Second attempt: repair and parse
+          try {
+            const repairedJson = repairJsonString(aiResponse);
+            parsedSections = JSON.parse(repairedJson);
+          } catch (repairError) {
+            if (attempt === maxRetries) {
+              console.error(`Final attempt failed for chunk ${chunkIndex + 1}. Original response:`, aiResponse);
+              throw new Error(`Failed to parse AI response after ${maxRetries} attempts: ${repairError.message}`);
+            }
+            console.log(`Repair failed on attempt ${attempt} for chunk ${chunkIndex + 1}, retrying...`);
+            continue;
+          }
+        }
+        
+        // Validate the structure
+        if (!parsedSections.sections || !Array.isArray(parsedSections.sections)) {
+          throw new Error(`Invalid response structure for chunk ${chunkIndex + 1}: missing sections array`);
+        }
+        
+        console.log(`Successfully parsed AI response for chunk ${chunkIndex + 1} on attempt ${attempt}`);
+        chunkSections = parsedSections.sections;
+        
+        // Now check if any of these sections already exist in the database
+        const sectionsToProcess = [];
+        for (const section of chunkSections) {
+          // Check if this section already exists
+          const { data: existingSection, error: checkError } = await supabase
+            .from('policy_sections')
+            .select('id')
+            .eq('policy_id', policyId)
+            .eq('section_title', section.section_title)
+            .maybeSingle();
+          
+          if (checkError) {
+            console.error(`Error checking existing section "${section.section_title}":`, checkError);
+            // If there's an error checking, process the section to be safe
+            sectionsToProcess.push(section);
+          } else if (existingSection) {
+            console.log(`Skipping already processed section: "${section.section_title}" for chunk ${chunkIndex + 1}`);
+          } else {
+            console.log(`Section "${section.section_title}" not found, will process`);
+            sectionsToProcess.push(section);
+          }
+        }
+        
+        allSections.push(...sectionsToProcess);
+        break; // Success, move to next chunk
+        
+      } catch (error) {
+        if (attempt === maxRetries) {
+          console.error(`All attempts failed for chunk ${chunkIndex + 1}:`, error.message);
+          // Continue with next chunk instead of failing completely
+          break;
+        }
+        console.log(`Attempt ${attempt} failed for chunk ${chunkIndex + 1}, retrying: ${error.message}`);
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+  }
+  
+  return { sections: allSections };
+}
+
+// Function to process policy with AI with retry mechanism and chunking (legacy version)
 async function processWithAIRetry(policy: any, openAIApiKey: string, maxRetries = 3): Promise<any> {
   console.log(`Starting chunked processing for policy: ${policy.category}`);
   
@@ -342,38 +438,8 @@ serve(async (req) => {
         continue;
       }
 
-      // Check if this policy has already been fully processed
-      const { data: existingSections, error: existingError } = await supabase
-        .from('policy_sections')
-        .select('id')
-        .eq('policy_id', policyData.id);
-
-      if (existingError) {
-        console.error(`Error checking existing sections for policy ${policy.category}:`, existingError);
-      }
-
-      if (existingSections && existingSections.length > 0) {
-        console.log(`Skipping already processed policy: ${policy.category} (${existingSections.length} sections found)`);
-        
-        // Count the existing sections for progress tracking
-        totalPoliciesProcessed++;
-        totalSectionsCreated += existingSections.length;
-        
-        // Update job progress
-        await supabase
-          .from('policy_analysis_jobs')
-          .update({
-            policies_processed: totalPoliciesProcessed,
-            sections_created: totalSectionsCreated,
-            progress_message: `Skipped already processed policy: ${policy.category}`
-          })
-          .eq('id', jobId);
-        
-        continue;
-      }
-
-      // Process the policy with AI using retry mechanism
-      const parsedSections = await processWithAIRetry(policy, openAIApiKey);
+      // Process the policy with AI using retry mechanism with chunk-level checking
+      const parsedSections = await processWithAIRetryStateful(policy, openAIApiKey, policyData.id, supabase);
 
       // Store sections in database for this policy
       const processedSections = [];
