@@ -342,6 +342,36 @@ serve(async (req) => {
         continue;
       }
 
+      // Check if this policy has already been fully processed
+      const { data: existingSections, error: existingError } = await supabase
+        .from('policy_sections')
+        .select('id')
+        .eq('policy_id', policyData.id);
+
+      if (existingError) {
+        console.error(`Error checking existing sections for policy ${policy.category}:`, existingError);
+      }
+
+      if (existingSections && existingSections.length > 0) {
+        console.log(`Skipping already processed policy: ${policy.category} (${existingSections.length} sections found)`);
+        
+        // Count the existing sections for progress tracking
+        totalPoliciesProcessed++;
+        totalSectionsCreated += existingSections.length;
+        
+        // Update job progress
+        await supabase
+          .from('policy_analysis_jobs')
+          .update({
+            policies_processed: totalPoliciesProcessed,
+            sections_created: totalSectionsCreated,
+            progress_message: `Skipped already processed policy: ${policy.category}`
+          })
+          .eq('id', jobId);
+        
+        continue;
+      }
+
       // Process the policy with AI using retry mechanism
       const parsedSections = await processWithAIRetry(policy, openAIApiKey);
 
