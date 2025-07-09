@@ -170,7 +170,7 @@ Return JSON with this exact structure:
 }
 
 // Function to process policy with AI with retry mechanism and chunking (stateful version)
-async function processWithAIRetryStateful(policy: any, openAIApiKey: string, policyId: string, supabase: any, maxRetries = 3): Promise<any> {
+async function processWithAIRetryStateful(policy: any, openAIApiKey: string, policyId: string, supabase: any, maxRetries = 3, maxChunksPerRun = 10): Promise<any> {
   console.log(`Starting stateful chunked processing for policy: ${policy.category}`);
   
   // Split the policy content into smaller chunks
@@ -178,9 +178,10 @@ async function processWithAIRetryStateful(policy: any, openAIApiKey: string, pol
   console.log(`Split policy into ${chunks.length} chunks`);
   
   const allSections = [];
+  let chunksProcessed = 0;
   
-  // Process each chunk
-  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+  // Process each chunk, but limit the number per run
+  for (let chunkIndex = 0; chunkIndex < chunks.length && chunksProcessed < maxChunksPerRun; chunkIndex++) {
     const chunk = chunks[chunkIndex];
     
     // Process chunk with AI to get potential sections for checking
@@ -247,12 +248,14 @@ async function processWithAIRetryStateful(policy: any, openAIApiKey: string, pol
         }
         
         allSections.push(...sectionsToProcess);
+        chunksProcessed++; // Increment counter for processed chunks
         break; // Success, move to next chunk
         
       } catch (error) {
         if (attempt === maxRetries) {
           console.error(`All attempts failed for chunk ${chunkIndex + 1}:`, error.message);
-          // Continue with next chunk instead of failing completely
+          // Still increment counter even if failed, to avoid infinite loops
+          chunksProcessed++;
           break;
         }
         console.log(`Attempt ${attempt} failed for chunk ${chunkIndex + 1}, retrying: ${error.message}`);
@@ -262,6 +265,7 @@ async function processWithAIRetryStateful(policy: any, openAIApiKey: string, pol
     }
   }
   
+  console.log(`Processed ${chunksProcessed} chunks in this run (max: ${maxChunksPerRun})`);
   return { sections: allSections };
 }
 
