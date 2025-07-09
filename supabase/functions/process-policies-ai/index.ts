@@ -54,7 +54,7 @@ function repairJsonString(jsonStr: string): string {
 }
 
 // Function to split policy content into smaller, manageable chunks
-function splitPolicyIntoChunks(content: string, maxChunkSize = 2000): string[] {
+function splitPolicyIntoChunks(content: string, maxChunkSize = 3000): string[] {
   // First try to split by clear section headers (numbered sections)
   let sections = content.split(/(?=\n\s*\d+\.\s+[A-Z])/);
   
