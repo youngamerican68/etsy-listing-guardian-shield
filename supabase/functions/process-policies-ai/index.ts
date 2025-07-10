@@ -170,18 +170,17 @@ Return JSON with this exact structure:
 }
 
 // Function to process policy with AI with retry mechanism and chunking (stateful version)
-async function processWithAIRetryStateful(policy: any, openAIApiKey: string, policyId: string, supabase: any, maxRetries = 3, maxChunksPerRun = 10): Promise<any> {
+async function processWithAIRetryStateful(policy: any, openAIApiKey: string, policyId: string, supabase: any, maxRetries = 3): Promise<any> {
   console.log(`Starting stateful chunked processing for policy: ${policy.category}`);
   
-  // Split the policy content into smaller chunks
-  const chunks = splitPolicyIntoChunks(policy.content);
+  // Split the policy content into smaller chunks (increased size to reduce total chunks)
+  const chunks = splitPolicyIntoChunks(policy.content, 5000);
   console.log(`Split policy into ${chunks.length} chunks`);
   
   const allSections = [];
-  let chunksProcessed = 0;
   
-  // Process each chunk, but limit the number per run
-  for (let chunkIndex = 0; chunkIndex < chunks.length && chunksProcessed < maxChunksPerRun; chunkIndex++) {
+  // Process all chunks in this run - no artificial limits
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
     const chunk = chunks[chunkIndex];
     
     // Process chunk with AI to get potential sections for checking
@@ -248,14 +247,11 @@ async function processWithAIRetryStateful(policy: any, openAIApiKey: string, pol
         }
         
         allSections.push(...sectionsToProcess);
-        chunksProcessed++; // Increment counter for processed chunks
         break; // Success, move to next chunk
         
       } catch (error) {
         if (attempt === maxRetries) {
           console.error(`All attempts failed for chunk ${chunkIndex + 1}:`, error.message);
-          // Still increment counter even if failed, to avoid infinite loops
-          chunksProcessed++;
           break;
         }
         console.log(`Attempt ${attempt} failed for chunk ${chunkIndex + 1}, retrying: ${error.message}`);
@@ -265,7 +261,7 @@ async function processWithAIRetryStateful(policy: any, openAIApiKey: string, pol
     }
   }
   
-  console.log(`Processed ${chunksProcessed} chunks in this run (max: ${maxChunksPerRun})`);
+  console.log(`Processed ${chunks.length} chunks for policy: ${policy.category}`);
   return { sections: allSections };
 }
 
