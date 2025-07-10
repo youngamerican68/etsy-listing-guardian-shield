@@ -369,170 +369,214 @@ serve(async (req) => {
 
     console.log(`Starting policy processing for job: ${jobId}`);
 
-    // Read policies from local file
-    const policiesResponse = await fetch('https://raw.githubusercontent.com/youngamerican68/etsy-listing-guardian-shield/main/policies.json');
-    
-    if (!policiesResponse.ok) {
-      throw new Error(`Failed to fetch policies.json: ${policiesResponse.status}`);
-    }
-    
-    const policiesData = await policiesResponse.json();
-    console.log('Raw policies data structure:', JSON.stringify(policiesData, null, 2).substring(0, 500));
-    
-    // Handle different possible JSON structures
-    const policies = Array.isArray(policiesData) ? policiesData : policiesData.policies || [];
-    console.log(`Loaded ${policies.length} policies from file`);
-    
-    if (policies.length === 0) {
-      throw new Error('No policies found in the JSON file');
+    // Get existing policies from database instead of fetching from GitHub
+    const { data: existingPolicies, error: policiesError } = await supabase
+      .from('etsy_policies')
+      .select('id, category, title, content, url')
+      .eq('is_active', true);
+
+    if (policiesError || !existingPolicies || existingPolicies.length === 0) {
+      // If no policies exist, try to fetch from GitHub as fallback
+      console.log('No policies found in database, attempting to fetch from GitHub...');
+      
+      const policiesResponse = await fetch('https://raw.githubusercontent.com/youngamerican68/etsy-listing-guardian-shield/main/policies.json');
+      
+      if (!policiesResponse.ok) {
+        throw new Error(`No policies in database and failed to fetch from GitHub: ${policiesResponse.status}`);
+      }
+      
+      const policiesData = await policiesResponse.json();
+      const policies = Array.isArray(policiesData) ? policiesData : policiesData.policies || [];
+      
+      if (policies.length === 0) {
+        throw new Error('No policies found');
+      }
+      
+      // Store policies in database first
+      for (const policy of policies) {
+        await supabase
+          .from('etsy_policies')
+          .upsert({
+            title: policy.category,
+            url: policy.url,
+            content: policy.content,
+            category: policy.category,
+            last_updated: policy.lastUpdated ? new Date(policy.lastUpdated).toISOString() : null,
+            scraped_at: new Date().toISOString(),
+            is_active: true
+          }, {
+            onConflict: 'url'
+          });
+      }
+      
+      // Re-fetch the stored policies
+      const { data: storedPolicies } = await supabase
+        .from('etsy_policies')
+        .select('id, category, title, content, url')
+        .eq('is_active', true);
+      
+      if (!storedPolicies || storedPolicies.length === 0) {
+        throw new Error('Failed to store policies in database');
+      }
+      
+      console.log(`Stored ${storedPolicies.length} policies in database`);
+      existingPolicies.push(...storedPolicies);
     }
 
-    let totalPoliciesProcessed = 0;
-    let totalSectionsCreated = 0;
-    let totalKeywordsExtracted = 0;
+    // Find the first policy that doesn't have sections processed
+    let policyToProcess = null;
+    let processedCount = 0;
+    
+    for (const policy of existingPolicies) {
+      const { data: existingSections } = await supabase
+        .from('policy_sections')
+        .select('id')
+        .eq('policy_id', policy.id)
+        .limit(1);
+      
+      if (existingSections && existingSections.length > 0) {
+        processedCount++;
+      } else if (!policyToProcess) {
+        policyToProcess = policy;
+      }
+    }
 
-    // Update job progress
+    // Update job with total count
     await supabase
       .from('policy_analysis_jobs')
       .update({
-        progress_message: `Processing ${policies.length} policies`,
-        total_policies: policies.length
+        total_policies: existingPolicies.length,
+        policies_processed: processedCount
       })
       .eq('id', jobId);
 
-    // Process each policy
-    console.log('First policy sample:', JSON.stringify(policies[0], null, 2));
-    
-    for (const policy of policies) {
-      console.log(`Processing policy object:`, typeof policy, policy);
-      console.log(`Processing policy: ${policy?.category}`);
-
-      // Update progress
+    // If all policies are processed, mark as complete
+    if (!policyToProcess) {
       await supabase
         .from('policy_analysis_jobs')
         .update({
-          progress_message: `Processing policy: ${policy.category}`,
-          policies_processed: totalPoliciesProcessed
+          status: 'completed',
+          progress_message: 'All policies have been processed successfully',
+          completed_at: new Date().toISOString()
         })
         .eq('id', jobId);
+      
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: 'All policies already processed',
+        jobId: jobId
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
-      // First, store the policy in the database
-      const { data: policyData, error: policyError } = await supabase
-        .from('etsy_policies')
-        .upsert({
-          title: policy.category,
-          url: policy.url,
-          content: policy.content,
-          category: policy.category,
-          last_updated: policy.lastUpdated ? new Date(policy.lastUpdated).toISOString() : null,
-          scraped_at: new Date().toISOString(),
-          is_active: true
-        }, {
-          onConflict: 'url'
+    console.log(`Processing single policy: ${policyToProcess.category}`);
+
+    // Update progress for the specific policy being processed
+    await supabase
+      .from('policy_analysis_jobs')
+      .update({
+        progress_message: `Processing policy: ${policyToProcess.category}`,
+        policies_processed: processedCount
+      })
+      .eq('id', jobId);
+
+    let totalSectionsCreated = 0;
+    let totalKeywordsExtracted = 0;
+
+    // Process the single policy with AI using retry mechanism with chunk-level checking
+    const parsedSections = await processWithAIRetryStateful(policyToProcess, openAIApiKey, policyToProcess.id, supabase);
+
+    // Store sections in database for this policy
+    const processedSections = [];
+
+    for (const [index, section] of parsedSections.sections.entries()) {
+      // Insert policy section
+      const { data: sectionData, error: sectionError } = await supabase
+        .from('policy_sections')
+        .insert({
+          policy_id: policyToProcess.id,
+          section_title: section.section_title,
+          section_content: section.section_content,
+          plain_english_summary: section.plain_english_summary,
+          category: section.category,
+          risk_level: section.risk_level,
+          order_index: index
         })
         .select()
         .single();
 
-      if (policyError) {
-        console.error(`Error storing policy ${policy.category}:`, policyError);
+      if (sectionError) {
+        console.error('Error inserting section:', sectionError);
         continue;
       }
 
-      // Process the policy with AI using retry mechanism with chunk-level checking
-      const parsedSections = await processWithAIRetryStateful(policy, openAIApiKey, policyData.id, supabase);
+      totalSectionsCreated++;
 
-      // Store sections in database for this policy
-      const processedSections = [];
+      // Insert keywords for this section
+      if (section.keywords && section.keywords.length > 0) {
+        const keywordInserts = section.keywords.map(kw => ({
+          policy_section_id: sectionData.id,
+          keyword: kw.keyword.toLowerCase(),
+          risk_level: kw.risk_level,
+          context: kw.context
+        }));
 
-      for (const [index, section] of parsedSections.sections.entries()) {
-        // Insert policy section
-        const { data: sectionData, error: sectionError } = await supabase
-          .from('policy_sections')
-          .insert({
-            policy_id: policyData.id,
-            section_title: section.section_title,
-            section_content: section.section_content,
-            plain_english_summary: section.plain_english_summary,
-            category: section.category,
-            risk_level: section.risk_level,
-            order_index: index
-          })
-          .select()
-          .single();
+        const { error: keywordError } = await supabase
+          .from('policy_keywords')
+          .insert(keywordInserts);
 
-        if (sectionError) {
-          console.error('Error inserting section:', sectionError);
-          continue;
+        if (keywordError) {
+          console.error('Error inserting keywords:', keywordError);
+        } else {
+          totalKeywordsExtracted += keywordInserts.length;
         }
-
-        // Insert keywords for this section
-        if (section.keywords && section.keywords.length > 0) {
-          const keywordInserts = section.keywords.map(kw => ({
-            policy_section_id: sectionData.id,
-            keyword: kw.keyword.toLowerCase(),
-            risk_level: kw.risk_level,
-            context: kw.context
-          }));
-
-          const { error: keywordError } = await supabase
-            .from('policy_keywords')
-            .insert(keywordInserts);
-
-          if (keywordError) {
-            console.error('Error inserting keywords:', keywordError);
-          }
-        }
-
-        processedSections.push({
-          ...section,
-          id: sectionData.id,
-          keywords_count: section.keywords?.length || 0
-        });
       }
 
-      console.log(`Successfully processed ${processedSections.length} sections for policy ${policy.category}`);
-      
-      totalPoliciesProcessed++;
-      totalSectionsCreated += processedSections.length;
-      
-      // Count keywords extracted
-      for (const section of processedSections) {
-        totalKeywordsExtracted += section.keywords_count || 0;
-      }
-
-      // Update job progress after each policy
-      await supabase
-        .from('policy_analysis_jobs')
-        .update({
-          policies_processed: totalPoliciesProcessed,
-          sections_created: totalSectionsCreated,
-          keywords_extracted: totalKeywordsExtracted,
-          progress_message: `Completed ${totalPoliciesProcessed}/${policies.length} policies`
-        })
-        .eq('id', jobId);
+      processedSections.push({
+        ...section,
+        id: sectionData.id,
+        keywords_count: section.keywords?.length || 0
+      });
     }
 
-    // Mark job as completed
+    console.log(`Successfully processed ${processedSections.length} sections for policy ${policyToProcess.category}`);
+    
+    // Update final counts after processing this policy
+    const finalProcessedCount = processedCount + 1;
+    
+    // Update job progress
     await supabase
       .from('policy_analysis_jobs')
       .update({
-        status: 'completed',
-        policies_processed: totalPoliciesProcessed,
+        policies_processed: finalProcessedCount,
         sections_created: totalSectionsCreated,
         keywords_extracted: totalKeywordsExtracted,
-        progress_message: `Successfully processed all ${totalPoliciesProcessed} policies`,
-        completed_at: new Date().toISOString()
+        progress_message: finalProcessedCount === existingPolicies.length 
+          ? 'All policies have been processed successfully'
+          : `Completed ${finalProcessedCount}/${existingPolicies.length} policies`
       })
       .eq('id', jobId);
+
+    // Check if this was the last policy to mark job as completed
+    if (finalProcessedCount === existingPolicies.length) {
+      await supabase
+        .from('policy_analysis_jobs')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
+    }
 
     console.log(`Job ${jobId} completed successfully`);
 
     return new Response(JSON.stringify({ 
       success: true,
-      policies_processed: totalPoliciesProcessed,
+      policies_processed: finalProcessedCount,
       sections_created: totalSectionsCreated,
       keywords_extracted: totalKeywordsExtracted,
-      message: `Successfully processed ${totalPoliciesProcessed} policies, created ${totalSectionsCreated} sections, and extracted ${totalKeywordsExtracted} keywords.`
+      message: `Successfully processed 1 policy (${policyToProcess.category}), created ${totalSectionsCreated} sections, and extracted ${totalKeywordsExtracted} keywords.`
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
