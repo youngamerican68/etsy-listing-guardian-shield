@@ -24,6 +24,15 @@ interface PolicySection {
   }>;
 }
 
+// Helper function to generate SHA-256 hash
+async function generateHash(text: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(text);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 // Helper function to repair common JSON syntax errors
 function repairJsonString(jsonStr: string): string {
   let repaired = jsonStr;
@@ -183,9 +192,29 @@ async function processWithAIRetryStateful(policy: any, openAIApiKey: string, pol
   for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
     const chunk = chunks[chunkIndex];
     
+    // Generate content hash for this chunk
+    const contentHash = await generateHash(chunk.trim());
+    
+    // Check if this chunk has already been processed by content hash
+    const { data: existingSection, error: checkError } = await supabase
+      .from('policy_sections')
+      .select('id')
+      .eq('policy_id', policyId)
+      .eq('content_hash', contentHash)
+      .maybeSingle();
+    
+    if (checkError) {
+      console.error(`Error checking existing section with hash "${contentHash}":`, checkError);
+      // If there's an error checking, process the chunk to be safe
+    } else if (existingSection) {
+      console.log(`Skipping already processed chunk ${chunkIndex + 1} (hash: ${contentHash.substring(0, 8)}...)`);
+      continue; // Skip this chunk entirely
+    } else {
+      console.log(`Chunk ${chunkIndex + 1} not found by hash, will process (hash: ${contentHash.substring(0, 8)}...)`);
+    }
+    
     // Process chunk with AI to get potential sections for checking
     let chunkSections = [];
-    let shouldProcessChunk = false;
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -223,30 +252,14 @@ async function processWithAIRetryStateful(policy: any, openAIApiKey: string, pol
         console.log(`Successfully parsed AI response for chunk ${chunkIndex + 1} on attempt ${attempt}`);
         chunkSections = parsedSections.sections;
         
-        // Now check if any of these sections already exist in the database
-        const sectionsToProcess = [];
+        // Since we've already checked the content hash for the entire chunk,
+        // and it's unique, we can process all sections from this chunk
+        // Add the content hash to each section so we can store it
         for (const section of chunkSections) {
-          // Check if this section already exists
-          const { data: existingSection, error: checkError } = await supabase
-            .from('policy_sections')
-            .select('id')
-            .eq('policy_id', policyId)
-            .eq('section_title', section.section_title)
-            .maybeSingle();
-          
-          if (checkError) {
-            console.error(`Error checking existing section "${section.section_title}":`, checkError);
-            // If there's an error checking, process the section to be safe
-            sectionsToProcess.push(section);
-          } else if (existingSection) {
-            console.log(`Skipping already processed section: "${section.section_title}" for chunk ${chunkIndex + 1}`);
-          } else {
-            console.log(`Section "${section.section_title}" not found, will process`);
-            sectionsToProcess.push(section);
-          }
+          section.content_hash = contentHash;
         }
         
-        allSections.push(...sectionsToProcess);
+        allSections.push(...chunkSections);
         break; // Success, move to next chunk
         
       } catch (error) {
@@ -491,7 +504,7 @@ serve(async (req) => {
     const processedSections = [];
 
     for (const [index, section] of parsedSections.sections.entries()) {
-      // Insert policy section
+      // Insert policy section with content hash
       const { data: sectionData, error: sectionError } = await supabase
         .from('policy_sections')
         .insert({
@@ -501,7 +514,8 @@ serve(async (req) => {
           plain_english_summary: section.plain_english_summary,
           category: section.category,
           risk_level: section.risk_level,
-          order_index: index
+          order_index: index,
+          content_hash: section.content_hash
         })
         .select()
         .single();

@@ -313,6 +313,7 @@ export type Database = {
       policy_sections: {
         Row: {
           category: string
+          content_hash: string | null
           created_at: string
           id: string
           order_index: number
@@ -325,6 +326,7 @@ export type Database = {
         }
         Insert: {
           category: string
+          content_hash?: string | null
           created_at?: string
           id?: string
           order_index?: number
@@ -337,6 +339,7 @@ export type Database = {
         }
         Update: {
           category?: string
+          content_hash?: string | null
           created_at?: string
           id?: string
           order_index?: number
