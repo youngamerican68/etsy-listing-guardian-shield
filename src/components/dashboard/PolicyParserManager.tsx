@@ -5,18 +5,22 @@ import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Download, FileText, Brain, Hash, Play } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { policyParserService } from '@/services/policyParserService';
-import { StartJobResult } from '@/services/policyJobService';
+import { StartJobResult, policyJobService } from '@/services/policyJobService';
 import JobProgressMonitor from './JobProgressMonitor';
 
 const PolicyParserManager = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [result, setResult] = useState<StartJobResult | null>(null);
+  const [autoRetryCount, setAutoRetryCount] = useState(0);
+  const [isAutoRetrying, setIsAutoRetrying] = useState(false);
 
   const handleParseAll = async () => {
     setIsProcessing(true);
     setResult(null);
     setCurrentJobId(null);
+    setAutoRetryCount(0);
+    setIsAutoRetrying(false);
 
     try {
       const parseResult = await policyParserService.parseAllEtsyPolicies();
@@ -24,6 +28,8 @@ const PolicyParserManager = () => {
       
       if (parseResult.success && parseResult.jobId) {
         setCurrentJobId(parseResult.jobId);
+        // Start auto-retry process
+        startAutoRetryProcess(parseResult.jobId);
       }
     } catch (error) {
       console.error('Error starting analysis:', error);
@@ -36,7 +42,65 @@ const PolicyParserManager = () => {
     }
   };
 
+  const startAutoRetryProcess = async (jobId: string) => {
+    const maxAttempts = 20; // Adjust based on typical completion time
+    const retryInterval = 5 * 60 * 1000; // 5 minutes between retries
+    
+    setIsAutoRetrying(true);
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      setAutoRetryCount(attempt);
+      
+      try {
+        // Check job status first
+        const jobStatus = await policyJobService.getJobStatus(jobId);
+        
+        if (jobStatus?.status === 'completed') {
+          console.log('Job completed successfully');
+          setIsAutoRetrying(false);
+          handleJobComplete();
+          return;
+        }
+        
+        if (jobStatus?.status === 'failed' || !jobStatus) {
+          console.log(`Job failed or not found, triggering new job (attempt ${attempt})`);
+          
+          // Trigger a new processing job
+          const parseResult = await policyParserService.parseAllEtsyPolicies();
+          
+          if (parseResult.success && parseResult.jobId) {
+            setCurrentJobId(parseResult.jobId);
+            // Continue monitoring the new job
+            await new Promise(resolve => setTimeout(resolve, retryInterval));
+            continue;
+          }
+        } else if (jobStatus?.status === 'running') {
+          console.log(`Job still running (attempt ${attempt}), waiting...`);
+          await new Promise(resolve => setTimeout(resolve, retryInterval));
+          continue;
+        }
+        
+      } catch (error) {
+        console.error(`Auto-retry attempt ${attempt} failed:`, error);
+        if (attempt === maxAttempts) {
+          setResult({
+            success: false,
+            message: `Auto-retry failed after ${maxAttempts} attempts`
+          });
+          break;
+        }
+      }
+      
+      // Wait before next attempt
+      await new Promise(resolve => setTimeout(resolve, retryInterval));
+    }
+    
+    setIsAutoRetrying(false);
+  };
+
   const handleJobComplete = () => {
+    setIsAutoRetrying(false);
+    setAutoRetryCount(0);
     // Trigger page refresh or data refetch when job completes
     window.location.reload();
   };
@@ -98,6 +162,17 @@ const PolicyParserManager = () => {
           </Alert>
         )}
 
+        {isAutoRetrying && (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Auto-retry mode active (attempt {autoRetryCount}/20). 
+              Processing will continue automatically until completion. 
+              Next retry in 5 minutes if job fails.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {result && !result.success && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
@@ -123,12 +198,12 @@ const PolicyParserManager = () => {
 
           <Button 
             onClick={handleParseAll}
-            disabled={isProcessing}
+            disabled={isProcessing || isAutoRetrying}
             size="lg"
             className="flex items-center gap-2"
           >
             <Play className="h-4 w-4" />
-            {isProcessing ? 'Processing...' : 'Parse All Policies'}
+            {isProcessing ? 'Starting...' : isAutoRetrying ? 'Auto-Retrying...' : 'Parse All Policies'}
           </Button>
         </div>
       </CardContent>
