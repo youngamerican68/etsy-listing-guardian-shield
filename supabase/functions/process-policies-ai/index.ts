@@ -477,7 +477,7 @@ serve(async (req) => {
       existingPolicies.push(...storedPolicies);
     }
 
-    // Find the first policy that doesn't have sections processed
+    // Find the first policy that doesn't have adequate sections processed
     let policyToProcess = null;
     let processedCount = 0;
     
@@ -485,12 +485,24 @@ serve(async (req) => {
       const { data: existingSections } = await supabase
         .from('policy_sections')
         .select('id')
-        .eq('policy_id', policy.id)
-        .limit(1);
+        .eq('policy_id', policy.id);
       
-      if (existingSections && existingSections.length > 0) {
+      // Consider a policy properly processed if it has more than 10 sections
+      // This ensures we reprocess policies like prohibited_items that failed partially
+      if (existingSections && existingSections.length > 10) {
         processedCount++;
+        console.log(`Policy ${policy.title} has ${existingSections.length} sections, considered complete`);
       } else if (!policyToProcess) {
+        if (existingSections && existingSections.length > 0) {
+          console.log(`Policy ${policy.title} has only ${existingSections.length} sections, will reprocess`);
+          // Clear incomplete sections before reprocessing
+          await supabase
+            .from('policy_sections')
+            .delete()
+            .eq('policy_id', policy.id);
+        } else {
+          console.log(`Policy ${policy.title} has no sections, will process`);
+        }
         policyToProcess = policy;
       }
     }
