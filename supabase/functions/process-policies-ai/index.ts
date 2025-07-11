@@ -263,11 +263,28 @@ async function processWithAIRetryStateful(policy: any, openAIApiKey: string, pol
         break; // Success, move to next chunk
         
       } catch (error) {
+        console.error(`Error processing chunk ${chunkIndex + 1} on attempt ${attempt}:`, error.message);
         if (attempt === maxRetries) {
           console.error(`All attempts failed for chunk ${chunkIndex + 1}:`, error.message);
-          break;
+          console.error(`Chunk content length: ${chunk.length}`);
+          console.error(`Chunk preview: ${chunk.substring(0, 200)}...`);
+          
+          // For very large/complex chunks that consistently fail, create a placeholder section
+          const placeholderSection = {
+            section_title: `Unprocessed Section ${chunkIndex + 1}`,
+            section_content: chunk.length > 1000 ? chunk.substring(0, 1000) + '...' : chunk,
+            plain_english_summary: 'This section could not be processed by AI and needs manual review.',
+            category: 'unprocessed',
+            risk_level: 'medium',
+            keywords: [],
+            content_hash: contentHash
+          };
+          
+          console.log(`Creating placeholder section for failed chunk ${chunkIndex + 1}`);
+          allSections.push(placeholderSection);
+          break; // Continue with next chunk
         }
-        console.log(`Attempt ${attempt} failed for chunk ${chunkIndex + 1}, retrying: ${error.message}`);
+        console.log(`Retrying chunk ${chunkIndex + 1} after ${1000 * attempt}ms delay...`);
         // Wait a bit before retrying
         await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
       }
@@ -325,17 +342,41 @@ async function processWithAIRetry(policy: any, openAIApiKey: string, maxRetries 
           throw new Error(`Invalid response structure for chunk ${chunkIndex + 1}: missing sections array`);
         }
         
-        console.log(`Successfully parsed AI response for chunk ${chunkIndex + 1} on attempt ${attempt}`);
-        allSections.push(...parsedSections.sections);
+        // Add content hash to each section for deduplication
+        const chunkHash = await generateHash(chunk.trim());
+        const sectionsWithHash = parsedSections.sections.map(section => ({
+          ...section,
+          content_hash: chunkHash
+        }));
+        
+        console.log(`Successfully parsed AI response for chunk ${chunkIndex + 1} on attempt ${attempt}, got ${sectionsWithHash.length} sections`);
+        allSections.push(...sectionsWithHash);
         break; // Success, move to next chunk
         
       } catch (error) {
+        console.error(`Error processing chunk ${chunkIndex + 1} on attempt ${attempt}:`, error.message);
         if (attempt === maxRetries) {
           console.error(`All attempts failed for chunk ${chunkIndex + 1}:`, error.message);
-          // Continue with next chunk instead of failing completely
-          break;
+          console.error(`Chunk content length: ${chunk.length}`);
+          console.error(`Chunk preview: ${chunk.substring(0, 200)}...`);
+          
+          // For very large/complex chunks that consistently fail, create a placeholder section
+          const chunkHash = await generateHash(chunk.trim());
+          const placeholderSection = {
+            section_title: `Unprocessed Section ${chunkIndex + 1}`,
+            section_content: chunk.length > 1000 ? chunk.substring(0, 1000) + '...' : chunk,
+            plain_english_summary: 'This section could not be processed by AI and needs manual review.',
+            category: 'unprocessed',
+            risk_level: 'medium',
+            keywords: [],
+            content_hash: chunkHash
+          };
+          
+          console.log(`Creating placeholder section for failed chunk ${chunkIndex + 1}`);
+          allSections.push(placeholderSection);
+          break; // Continue with next chunk
         }
-        console.log(`Attempt ${attempt} failed for chunk ${chunkIndex + 1}, retrying: ${error.message}`);
+        console.log(`Retrying chunk ${chunkIndex + 1} after ${1000 * attempt}ms delay...`);
         // Wait a bit before retrying
         await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
       }
