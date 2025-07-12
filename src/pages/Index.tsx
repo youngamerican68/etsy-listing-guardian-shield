@@ -1,208 +1,156 @@
-// src/components/dashboard/PolicyParserManager.tsx
-// COMPLETE AND CORRECTED FILE
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { AlertCircle, Download, FileText, Brain, Hash, Play, StopCircle } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { policyParserService } from '@/services/policyParserService';
-import { StartJobResult, policyJobService } from '@/services/policyJobService';
-import { supabase } from '@/integrations/supabase/client';
-import JobProgressMonitor from '@/components/dashboard/JobProgressMonitor';
+import { Card, CardContent } from '@/components/ui/card';
+import Hero from '@/components/Hero';
+import Features from '@/components/Features';
+import ComplianceCheckForm from '@/components/dashboard/ComplianceCheckForm';
+import CheckHistoryList from '@/components/dashboard/CheckHistoryList';
 
-const PolicyParserManager = () => {
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
-  const [result, setResult] = useState<StartJobResult | null>(null);
-  const [hasActiveJob, setHasActiveJob] = useState(false);
-  const [processedPoliciesCount, setProcessedPoliciesCount] = useState(0);
-  const [currentPolicyCategory, setCurrentPolicyCategory] = useState<string>('');
+interface ListingCheck {
+  id: string;
+  title: string;
+  description: string;
+  status: 'pass' | 'warning' | 'fail';
+  createdAt: string;
+  flaggedTerms: string[];
+  suggestions: string[];
+}
 
-  useEffect(() => {
-    const checkForActiveJob = async () => {
-      try {
-        const latestJob = await policyJobService.getLatestJob();
-        if (latestJob && (latestJob.status === 'running' || latestJob.status === 'pending')) {
-          setCurrentJobId(latestJob.id);
-          setIsProcessing(true); // Assume it's processing if it's running
-          setHasActiveJob(true);
-        }
-      } catch (error) {
-        console.error('Error checking for active jobs:', error);
-      }
-    };
+const Index = () => {
+  const { user, loading } = useAuth();
+  const [checks, setChecks] = useState<ListingCheck[]>([]);
 
-    checkForActiveJob();
-  }, []);
-
-  // The orchestrator function is now correctly defined INSIDE the component,
-  // so it has access to useState hooks (e.g., setResult, setIsProcessing).
-  const processAllPolicies = async (jobId: string) => {
-    if (!jobId) {
-      console.error("Job ID is required to start processing.");
-      setResult({ success: false, message: 'Job ID is required.' });
-      return;
-    }
-
-    setIsProcessing(true);
-    setHasActiveJob(true);
-    setProcessedPoliciesCount(0);
-    setCurrentPolicyCategory('');
-
-    let isJobComplete = false;
-    let processedCount = 0;
-
-    // This is the ONLY loop needed.
-    while (!isJobComplete) {
-      try {
-        // STEP 1: FIND the next policy to work on.
-        setCurrentPolicyCategory('Finding next policy...');
-        console.log("Orchestrator: Finding next policy...");
-
-        const findResponse = await supabase.functions.invoke('process-policies-ai', {
-          body: { jobId }
-        });
-
-        if (findResponse.error) throw new Error(findResponse.error.message);
-        
-        const findResult = findResponse.data;
-
-        if (findResult.completed) {
-          isJobComplete = true;
-          console.log("Orchestrator: All policies processed!");
-          setResult({ success: true, message: 'All policies processed successfully!' });
-          break; // Exit the loop
-        }
-
-        if (findResult.nextPolicyId) {
-          // STEP 2: PROCESS the entire policy found in Step 1.
-          console.log(`Orchestrator: Found policy ${findResult.policyCategory}. Telling server to process it.`);
-          setCurrentPolicyCategory(findResult.policyCategory);
-
-          const processResponse = await supabase.functions.invoke('process-policies-ai', {
-            body: {
-              jobId,
-              policyId: findResult.nextPolicyId
-            }
-          });
-
-          if (processResponse.error) throw new Error(processResponse.error.message);
-
-          console.log(`Orchestrator: Server finished processing ${findResult.policyCategory}.`);
-          processedCount++;
-          setProcessedPoliciesCount(processedCount);
-
-        } else {
-          console.error("Orchestrator: Finder did not return a next policy or completion flag. Stopping.");
-          isJobComplete = true;
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-      } catch (error) {
-        console.error("Orchestrator: A critical error occurred.", error);
-        setResult({ success: false, message: error instanceof Error ? error.message : 'An unknown error stopped the process.' });
-        isJobComplete = true; // Stop the loop on any error
-      }
-    }
-
-    setIsProcessing(false);
-    setHasActiveJob(false);
-    setCurrentPolicyCategory('');
+  const handleCheckComplete = (result: ListingCheck) => {
+    setChecks(prev => [result, ...prev]);
   };
 
-  const handleParseAll = async () => {
-    setIsProcessing(true);
-    setResult(null);
-    setCurrentJobId(null);
-    setHasActiveJob(false);
-
-    try {
-      // Create the job record first
-      const parseResult = await policyParserService.parseAllEtsyPolicies();
-      setResult(parseResult);
-      
-      if (parseResult.success && parseResult.jobId) {
-        setCurrentJobId(parseResult.jobId);
-        // Start the client-side orchestration
-        await processAllPolicies(parseResult.jobId);
-      } else {
-        setIsProcessing(false); // Stop processing if job creation failed
-      }
-    } catch (error) {
-      console.error('Error starting analysis:', error);
-      setResult({ success: false, message: error instanceof Error ? error.message : 'Unknown error occurred' });
-      setIsProcessing(false);
-      setHasActiveJob(false);
+  const scrollToChecker = () => {
+    const element = document.getElementById('compliance-checker');
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
-  const handleJobComplete = () => {
-    setHasActiveJob(false);
-    setCurrentJobId(null);
-    setIsProcessing(false);
-    // Optional: refresh data without a full page reload if possible
-    console.log("Job completed or failed. Resetting state.");
-  };
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="text-lg">Loading...</div>
+      </div>
+    );
+  }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Brain className="h-5 w-5" />
-          Policy Parser & AI Processor
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {/* ... your JSX for the UI remains the same ... */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="flex items-center gap-3 p-4 border rounded-lg"><Download className="h-8 w-8 text-blue-500" /><div><p className="font-medium">Web Scraping</p><p className="text-sm text-muted-foreground">Extract Etsy's ToS & policies</p></div></div>
-          <div className="flex items-center gap-3 p-4 border rounded-lg"><FileText className="h-8 w-8 text-green-500" /><div><p className="font-medium">AI Processing</p><p className="text-sm text-muted-foreground">Categorize & summarize rules</p></div></div>
-          <div className="flex items-center gap-3 p-4 border rounded-lg"><Hash className="h-8 w-8 text-purple-500" /><div><p className="font-medium">Keyword Extraction</p><p className="text-sm text-muted-foreground">Extract prohibited terms</p></div></div>
-        </div>
-        <Alert><AlertCircle className="h-4 w-4" /><AlertDescription>This process will scrape Etsy's current Terms of Service and related policies, then use AI to categorize rules, generate plain English summaries, and extract prohibited keywords. This may take several minutes to complete.</AlertDescription></Alert>
-        {isProcessing && (
-          <Alert>
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              {currentPolicyCategory ? 
-                `Processing policy: ${currentPolicyCategory}... (${processedPoliciesCount} completed)` : 
-                'Starting autonomous analysis job...'
-              }
-            </AlertDescription>
-          </Alert>
-        )}
-        {result && !result.success && (
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{result.message}</AlertDescription>
-          </Alert>
-        )}
-        {currentJobId && (
-          <JobProgressMonitor jobId={currentJobId} onJobComplete={handleJobComplete} />
-        )}
-        <div className="flex justify-between items-center">
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Target Policies</p>
-            <div className="flex flex-wrap gap-1">
-              {['Terms of Use', 'Prohibited Items', 'Handmade Policy', 'IP Policy', 'Fees', 'Community Guidelines'].map((policy) => (
-                <Badge key={policy} variant="outline" className="text-xs">{policy}</Badge>
-              ))}
+    <div className="min-h-screen bg-gray-50">
+      {/* Hero Section */}
+      <Hero onGetStartedClick={scrollToChecker} />
+      
+      {/* Features Section */}
+      <Features />
+
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        {user ? (
+          // Authenticated user sees the full compliance checking interface
+          <div id="compliance-checker" className="space-y-8">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                Check Your Listing Compliance
+              </h2>
+              <p className="text-lg text-gray-600">
+                Enter your Etsy listing details below to check for compliance issues
+              </p>
+            </div>
+
+            <ComplianceCheckForm onCheckComplete={handleCheckComplete} />
+            
+            {checks.length > 0 && (
+              <div className="mt-12">
+                <h3 className="text-2xl font-bold text-gray-900 mb-6">
+                  Recent Checks
+                </h3>
+                <CheckHistoryList checks={checks} />
+              </div>
+            )}
+
+            {/* Admin Link for authenticated users */}
+            <div className="text-center mt-12">
+              <Link to="/admin">
+                <Button variant="outline">
+                  Admin Dashboard
+                </Button>
+              </Link>
             </div>
           </div>
-          <Button onClick={handleParseAll} disabled={isProcessing} size="lg" className="flex items-center gap-2">
-            {isProcessing ? (
-              <><StopCircle className="h-4 w-4 animate-spin" />Processing...</>
-            ) : (
-              <><Play className="h-4 w-4" />Start Autonomous Processing</>
-            )}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+        ) : (
+          // Non-authenticated users see a preview and login prompt
+          <div id="compliance-checker" className="space-y-8">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                Ready to Check Your Listings?
+              </h2>
+              <p className="text-lg text-gray-600 mb-8">
+                Sign up for free to start checking your Etsy listings for compliance issues
+              </p>
+            </div>
+
+            <Card className="max-w-2xl mx-auto">
+              <CardContent className="p-12 text-center">
+                <div className="space-y-6">
+                  <div className="text-6xl mb-4">🛡️</div>
+                  <h3 className="text-2xl font-semibold text-gray-900">
+                    Get Started in Seconds
+                  </h3>
+                  <p className="text-gray-600">
+                    Create your free account to access the compliance checker and protect your listings from takedowns.
+                  </p>
+                  <div className="space-y-3">
+                    <Link to="/auth">
+                      <Button size="lg" className="w-full">
+                        Sign Up Free - No Credit Card Required
+                      </Button>
+                    </Link>
+                    <Link to="/test-compliance">
+                      <Button variant="outline" size="lg" className="w-full">
+                        Try Test Version (Limited Features)
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Feature highlights for non-authenticated users */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
+              <Card>
+                <CardContent className="p-6 text-center">
+                  <div className="text-3xl mb-3">⚡</div>
+                  <h4 className="font-semibold mb-2">Instant Results</h4>
+                  <p className="text-sm text-gray-600">Get compliance results in seconds</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-6 text-center">
+                  <div className="text-3xl mb-3">🎯</div>
+                  <h4 className="font-semibold mb-2">Smart Suggestions</h4>
+                  <p className="text-sm text-gray-600">Receive actionable recommendations</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-6 text-center">
+                  <div className="text-3xl mb-3">📊</div>
+                  <h4 className="font-semibold mb-2">Track History</h4>
+                  <p className="text-sm text-gray-600">Monitor all your compliance checks</p>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 
-export default PolicyParserManager;
+export default Index;
