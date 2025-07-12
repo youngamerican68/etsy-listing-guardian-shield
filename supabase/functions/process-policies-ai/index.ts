@@ -56,6 +56,18 @@ serve(async (req) => {
     if (!policyId) {
       console.log(`[FINDER MODE] Finding next section for job: ${jobId}`);
       
+      // First time running this job? Clear any existing sections for a fresh start
+      const { data: jobData } = await supabase
+        .from('policy_analysis_jobs')
+        .select('started_at, policies_processed')
+        .eq('id', jobId)
+        .single();
+      
+      if (jobData && (!jobData.policies_processed || jobData.policies_processed === 0)) {
+        console.log('[FINDER MODE] Clearing existing sections for fresh start...');
+        await supabase.from('policy_sections').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      }
+      
       // Get all active policies
       const { data: policies, error: policiesError } = await supabase
         .from('etsy_policies')
