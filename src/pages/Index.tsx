@@ -10,7 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { policyParserService } from '@/services/policyParserService';
 import { StartJobResult, policyJobService } from '@/services/policyJobService';
 import { supabase } from '@/integrations/supabase/client';
-import JobProgressMonitor from './JobProgressMonitor';
+import JobProgressMonitor from '@/components/dashboard/JobProgressMonitor';
 
 const PolicyParserManager = () => {
   const [isProcessing, setIsProcessing] = useState(false);
