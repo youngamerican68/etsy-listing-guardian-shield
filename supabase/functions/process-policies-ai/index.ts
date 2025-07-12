@@ -14,10 +14,23 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Helper to repair JSON - no changes needed
+// Helper to repair JSON - handles markdown code blocks and malformed JSON
 function repairJsonString(jsonString: string): string {
-  try { JSON.parse(jsonString); return jsonString; }
-  catch { return jsonString.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']').replace(/([{,]\s*)(\w+):/g, '$1"$2":').replace(/:\s*'([^']*)'/g, ':"$1"').replace(/\\'/g, "'").replace(/\n/g, '\\n'); }
+  // Remove markdown code block wrapper if present
+  let cleaned = jsonString.replace(/^```(?:json)?\s*\n/, '').replace(/\n```\s*$/, '').trim();
+  
+  try { 
+    JSON.parse(cleaned); 
+    return cleaned; 
+  } catch { 
+    return cleaned
+      .replace(/,\s*}/g, '}')
+      .replace(/,\s*]/g, ']')
+      .replace(/([{,]\s*)(\w+):/g, '$1"$2":')
+      .replace(/:\s*'([^']*)'/g, ':"$1"')
+      .replace(/\\'/g, "'")
+      .replace(/\n/g, '\\n'); 
+  }
 }
 
 // Helper to analyze a SINGLE section - this is the core of the function now
