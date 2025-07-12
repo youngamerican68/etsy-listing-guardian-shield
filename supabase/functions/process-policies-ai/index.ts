@@ -57,156 +57,146 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
   
   try {
-    const { jobId, policyId } = await req.json();
+    const { jobId } = await req.json();
 
     if (!jobId) {
       throw new Error('jobId is required');
     }
 
-    // FINDER MODE: Find next policy to process
-    if (!policyId) {
-      console.log(`[FINDER] Finding next policy for job: ${jobId}`);
+    console.log(`[SECTION MODE] Processing one section for job: ${jobId}`);
+    
+    // Check job status
+    const { data: currentJob } = await supabase
+      .from('policy_analysis_jobs')
+      .select('status, sections_created')
+      .eq('id', jobId)
+      .single();
+    
+    if (currentJob?.status === 'failed' || currentJob?.status === 'completed') {
+      return new Response(JSON.stringify({
+        success: false,
+        completed: true,
+        message: `Job is ${currentJob.status}`
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    
+    // Clear sections only on first run
+    if (!currentJob?.sections_created || currentJob.sections_created === 0) {
+      await supabase.from('policy_sections').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    }
+    
+    // Get all policies and find one that needs more sections
+    const { data: policies } = await supabase
+      .from('etsy_policies')
+      .select('id, category, content')
+      .eq('is_active', true)
+      .order('category');
+    
+    let targetPolicy = null;
+    let sectionToProcess = null;
+    
+    // Find a policy that needs more sections (less than 3)
+    for (const policy of policies) {
+      const { data: sections } = await supabase
+        .from('policy_sections')
+        .select('id, section_title')
+        .eq('policy_id', policy.id);
       
-      // Check job status
-      const { data: currentJob } = await supabase
-        .from('policy_analysis_jobs')
-        .select('status, policies_processed')
-        .eq('id', jobId)
-        .single();
-      
-      if (currentJob?.status === 'failed' || currentJob?.status === 'completed') {
-        return new Response(JSON.stringify({
-          success: false,
-          completed: true,
-          message: `Job is ${currentJob.status}`
-        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-      
-      // Clear sections only on first run
-      if (!currentJob?.policies_processed || currentJob.policies_processed === 0) {
-        await supabase.from('policy_sections').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      }
-      
-      // Get all policies
-      const { data: policies } = await supabase
-        .from('etsy_policies')
-        .select('id, category')
-        .eq('is_active', true)
-        .order('category');
-      
-      // Find first unprocessed policy (one with < 3 sections)
-      for (const policy of policies) {
-        const { data: sections } = await supabase
-          .from('policy_sections')
-          .select('id')
-          .eq('policy_id', policy.id);
+      if ((sections?.length || 0) < 3) {
+        targetPolicy = policy;
         
-        if ((sections?.length || 0) < 3) {
-          console.log(`[FINDER] Next policy: ${policy.category} (${sections?.length || 0} sections)`);
-          return new Response(JSON.stringify({
-            success: true,
-            nextPolicyId: policy.id,
-            policyCategory: policy.category,
-            completed: false
-          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        }
+        // Extract potential sections from content
+        const lines = policy.content.split('\n');
+        const sectionTitles = lines
+          .filter(line => {
+            const trimmed = line.trim();
+            return trimmed.length > 10 && 
+                   trimmed.length < 100 && 
+                   !trimmed.includes('©') &&
+                   !trimmed.includes('etsy.com');
+          })
+          .slice(0, 5);
+        
+        // Find a section that hasn't been processed yet
+        const existingSectionTitles = sections?.map(s => s.section_title) || [];
+        sectionToProcess = sectionTitles.find(title => 
+          !existingSectionTitles.some(existing => existing.includes(title.substring(0, 20)))
+        );
+        
+        if (sectionToProcess) break;
       }
-      
-      // All done
+    }
+    
+    // If no work to do, mark as completed
+    if (!targetPolicy || !sectionToProcess) {
       await supabase.from('policy_analysis_jobs').update({ 
         status: 'completed', 
         completed_at: new Date().toISOString(),
-        progress_message: 'All policies processed!'
+        progress_message: 'All sections processed!'
       }).eq('id', jobId);
       
       return new Response(JSON.stringify({
         success: true,
         completed: true,
-        message: 'All policies processed!'
+        message: 'All sections processed!'
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // WORKER MODE: Process specific policy
-    console.log(`[WORKER] Processing policy: ${policyId}`);
+    // Process just this one section
+    console.log(`Processing section: ${sectionToProcess} from ${targetPolicy.category}`);
     
-    // Get current job data for tracking
-    const { data: currentJob } = await supabase
-      .from('policy_analysis_jobs')
-      .select('policies_processed')
-      .eq('id', jobId)
-      .single();
+    const lines = targetPolicy.content.split('\n');
+    const startIndex = lines.findIndex(line => line.includes(sectionToProcess));
+    const sectionContent = lines.slice(startIndex, startIndex + 8).join('\n').trim();
     
-    const { data: policy } = await supabase
-      .from('etsy_policies')
-      .select('content, category')
-      .eq('id', policyId)
-      .single();
+    // Update progress
+    await supabase.from('policy_analysis_jobs').update({
+      progress_message: `Processing ${targetPolicy.category}: ${sectionToProcess}`
+    }).eq('id', jobId);
 
-    // Extract 3 sections only
-    const lines = policy.content.split('\n');
-    const sectionTitles = lines
-      .filter(line => {
-        const trimmed = line.trim();
-        return trimmed.length > 0 && 
-               trimmed.length < 100 && 
-               !trimmed.includes('©') &&
-               !trimmed.includes('etsy.com');
-      })
-      .slice(0, 3); // Only 3 sections
+    // Generate hash
+    const encoder = new TextEncoder();
+    const data = encoder.encode(sectionContent);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const contentHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-    // Process sections
-    for (let i = 0; i < sectionTitles.length; i++) {
-      const sectionTitle = sectionTitles[i];
-      const startIndex = lines.findIndex(line => line.includes(sectionTitle));
-      const sectionContent = lines.slice(startIndex, startIndex + 8).join('\n').trim();
-      
-      // Generate hash
-      const encoder = new TextEncoder();
-      const data = encoder.encode(sectionContent);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const contentHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-      // Update progress
-      await supabase.from('policy_analysis_jobs').update({
-        progress_message: `Processing ${policy.category}: ${sectionTitle}`
-      }).eq('id', jobId);
-
-      let parsed;
-      try {
-        const aiResponse = await analyzeSection(sectionTitle, sectionContent, policy.category, openAIApiKey!);
-        parsed = JSON.parse(repairJsonString(aiResponse));
-      } catch (aiError) {
-        parsed = {
-          section_title: sectionTitle,
-          section_content: sectionContent,
-          plain_english_summary: `Analysis unavailable for ${sectionTitle}`,
-          category: 'prohibited_items',
-          risk_level: 'medium'
-        };
-      }
-
-      // Insert section
-      await supabase.from('policy_sections').insert({
-        policy_id: policyId,
-        section_title: parsed.section_title || sectionTitle,
-        section_content: parsed.section_content || sectionContent,
-        plain_english_summary: parsed.plain_english_summary || '',
-        category: parsed.category || 'prohibited_items',
-        risk_level: parsed.risk_level || 'medium',
-        content_hash: contentHash,
-        order_index: i + 1
-      });
+    let parsed;
+    try {
+      const aiResponse = await analyzeSection(sectionToProcess, sectionContent, targetPolicy.category, openAIApiKey!);
+      parsed = JSON.parse(repairJsonString(aiResponse));
+    } catch (aiError) {
+      console.error('AI failed, using defaults:', aiError.message);
+      parsed = {
+        section_title: sectionToProcess,
+        section_content: sectionContent,
+        plain_english_summary: `Analysis unavailable for ${sectionToProcess}`,
+        category: 'prohibited_items',
+        risk_level: 'medium'
+      };
     }
 
-    // Update policies processed count
+    // Insert section
+    await supabase.from('policy_sections').insert({
+      policy_id: targetPolicy.id,
+      section_title: parsed.section_title || sectionToProcess,
+      section_content: parsed.section_content || sectionContent,
+      plain_english_summary: parsed.plain_english_summary || '',
+      category: parsed.category || 'prohibited_items',
+      risk_level: parsed.risk_level || 'medium',
+      content_hash: contentHash,
+      order_index: ((currentJob?.sections_created || 0) % 3) + 1
+    });
+
+    // Update sections count
     await supabase.from('policy_analysis_jobs').update({
-      policies_processed: (currentJob?.policies_processed || 0) + 1
+      sections_created: (currentJob?.sections_created || 0) + 1
     }).eq('id', jobId);
 
     return new Response(JSON.stringify({ 
       success: true, 
-      message: `Processed ${sectionTitles.length} sections for ${policy.category}` 
+      message: `Processed section: ${sectionToProcess}`,
+      continue: true
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {
