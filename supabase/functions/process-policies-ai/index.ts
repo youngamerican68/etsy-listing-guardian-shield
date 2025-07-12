@@ -42,13 +42,18 @@ serve(async (req) => {
   }
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  let body: any = {};
   
   try {
-    const body = await req.json();
-    const { jobId, policyId, sectionTitle, sectionContent, policyCategory, contentHash, orderIndex } = body;
+    body = await req.json();
+    const { jobId, policyId } = body;
+
+    if (!jobId) {
+      throw new Error('jobId is required');
+    }
 
     // FINDER MODE: If only jobId is provided, find the next section to process
-    if (jobId && !policyId) {
+    if (!policyId) {
       console.log(`[FINDER MODE] Finding next section for job: ${jobId}`);
       
       // Get all active policies
@@ -190,8 +195,7 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('CRITICAL ERROR:', error.message);
-    const body = await req.json().catch(() => ({}));
-    const { jobId } = body;
+    const { jobId } = body || {};
     if (jobId) {
       await supabase.from('policy_analysis_jobs').update({ 
         status: 'failed', 
