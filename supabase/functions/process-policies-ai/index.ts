@@ -129,6 +129,13 @@ serve(async (req) => {
     // WORKER MODE: Process specific policy
     console.log(`[WORKER] Processing policy: ${policyId}`);
     
+    // Get current job data for tracking
+    const { data: currentJob } = await supabase
+      .from('policy_analysis_jobs')
+      .select('policies_processed')
+      .eq('id', jobId)
+      .single();
+    
     const { data: policy } = await supabase
       .from('etsy_policies')
       .select('content, category')
