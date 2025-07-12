@@ -189,27 +189,35 @@ function levenshteinDistance(str1: string, str2: string): number {
   return matrix[str2.length][str1.length];
 }
 
-// Continue processing (self-invoke for continuous execution)
-async function continuePolicyProcessing(jobId: string) {
+// Continue processing using a different approach - schedule immediate retry
+async function scheduleContinuation(jobId: string) {
   try {
-    console.log(`Attempting to continue processing for job ${jobId}...`);
+    console.log(`Scheduling continuation for job ${jobId}...`);
     
-    const response = await fetch(`${supabaseUrl}/functions/v1/process-policies-ai`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${supabaseServiceKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ jobId, continueProcessing: true }),
-    });
+    // Use setTimeout to delay the next invocation slightly
+    setTimeout(async () => {
+      try {
+        const response = await fetch(`${supabaseUrl}/functions/v1/process-policies-ai`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${supabaseServiceKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ jobId, continueProcessing: true }),
+        });
 
-    if (!response.ok) {
-      console.error('Failed to continue processing:', await response.text());
-    } else {
-      console.log('Successfully triggered continuation of processing');
-    }
+        if (!response.ok) {
+          console.error('Failed to continue processing:', await response.text());
+        } else {
+          console.log('Successfully triggered continuation of processing');
+        }
+      } catch (error) {
+        console.error('Error in scheduled continuation:', error);
+      }
+    }, 2000); // 2 second delay
+    
   } catch (error) {
-    console.error('Error continuing processing:', error);
+    console.error('Error scheduling continuation:', error);
   }
 }
 
@@ -253,9 +261,10 @@ serve(async (req) => {
 
     let processedCount = 0;
     let totalSectionsCreated = 0;
+    let policiesNeedingWork = [];
 
+    // First pass: identify which policies need work
     for (const policy of policies) {
-      // Check if policy is already completely processed
       const { data: existingSections, error: checkError } = await supabase
         .from('policy_sections')
         .select('id', { count: 'exact' })
@@ -265,12 +274,26 @@ serve(async (req) => {
       if (!checkError && existingSections && existingSections.length > 3) {
         console.log(`Policy ${policy.category} already processed with ${existingSections.length} sections. Skipping.`);
         processedCount++;
-        continue;
+      } else {
+        policiesNeedingWork.push(policy);
       }
+    }
 
-      // If policy has fewer sections, clean it up and reprocess
+    console.log(`Found ${policiesNeedingWork.length} policies needing processing`);
+
+    // Process only the first policy in this batch to avoid timeouts
+    if (policiesNeedingWork.length > 0) {
+      const policy = policiesNeedingWork[0];
+      console.log(`Processing policy: ${policy.category}`);
+
+      // Clean up existing incomplete sections
+      const { data: existingSections } = await supabase
+        .from('policy_sections')
+        .select('id', { count: 'exact' })
+        .eq('policy_id', policy.id);
+
       if (existingSections && existingSections.length > 0) {
-        console.log(`Policy ${policy.category} has only ${existingSections.length} sections. Cleaning up and reprocessing...`);
+        console.log(`Policy ${policy.category} has ${existingSections.length} sections. Cleaning up and reprocessing...`);
         await supabase.from('policy_sections').delete().eq('policy_id', policy.id);
       }
 
@@ -283,90 +306,86 @@ serve(async (req) => {
       console.log(`Extracted ${sectionTitles.length} section titles for ${policy.category}`);
 
       if (sectionTitles.length === 0) {
-        console.log(`No sections found for ${policy.category}, skipping...`);
+        console.log(`No sections found for ${policy.category}, marking as processed...`);
         processedCount++;
-        continue;
-      }
-
-      // Step B: Process each section individually
-      let sectionCount = 0;
-      for (const sectionTitle of sectionTitles) {
-        sectionCount++;
+      } else {
+        // Process a limited number of sections to avoid timeout
+        const maxSectionsPerBatch = 3;
+        const sectionsToProcess = sectionTitles.slice(0, maxSectionsPerBatch);
         
-        await supabase.from('policy_analysis_jobs').update({ 
-          progress_message: `Processing section ${sectionCount}/${sectionTitles.length} of ${policy.category}: ${sectionTitle}` 
-        }).eq('id', jobId);
+        console.log(`Processing ${sectionsToProcess.length} sections from ${policy.category}`);
 
-        // Find the section content
-        const sectionContent = findSectionContent(policy.content, sectionTitle);
-        
-        // Generate content hash for deduplication
-        const contentHash = await generateHash(sectionContent);
+        // Step B: Process sections individually
+        let sectionCount = 0;
+        for (const sectionTitle of sectionsToProcess) {
+          sectionCount++;
+          
+          await supabase.from('policy_analysis_jobs').update({ 
+            progress_message: `Processing section ${sectionCount}/${sectionsToProcess.length} of ${policy.category}: ${sectionTitle}` 
+          }).eq('id', jobId);
 
-        // Check if this exact content was already processed
-        const { data: existingSection } = await supabase
-          .from('policy_sections')
-          .select('id')
-          .eq('content_hash', contentHash)
-          .maybeSingle();
+          // Find the section content
+          const sectionContent = findSectionContent(policy.content, sectionTitle);
+          
+          // Generate content hash for deduplication
+          const contentHash = await generateHash(sectionContent);
 
-        if (existingSection) {
-          console.log(`Section "${sectionTitle}" already processed (hash: ${contentHash.substring(0, 12)})`);
-          continue;
-        }
+          try {
+            // Step B: Analyze this specific section
+            const aiResponse = await analyzeSection(sectionTitle, sectionContent, policy.category, openAIApiKey);
+            const parsed = JSON.parse(repairJsonString(aiResponse));
 
-        try {
-          // Step B: Analyze this specific section
-          const aiResponse = await analyzeSection(sectionTitle, sectionContent, policy.category, openAIApiKey);
-          const parsed = JSON.parse(repairJsonString(aiResponse));
+            // Insert the processed section
+            const { error: insertError } = await supabase.from('policy_sections').insert({
+              policy_id: policy.id,
+              section_title: parsed.section_title || sectionTitle,
+              section_content: parsed.section_content || sectionContent,
+              plain_english_summary: parsed.plain_english_summary || '',
+              category: parsed.category || 'general',
+              risk_level: parsed.risk_level || 'medium',
+              content_hash: contentHash,
+              order_index: sectionCount
+            });
 
-          // Insert the processed section
-          const { error: insertError } = await supabase.from('policy_sections').insert({
-            policy_id: policy.id,
-            section_title: parsed.section_title || sectionTitle,
-            section_content: parsed.section_content || sectionContent,
-            plain_english_summary: parsed.plain_english_summary || '',
-            category: parsed.category || 'general',
-            risk_level: parsed.risk_level || 'medium',
-            content_hash: contentHash,
-            order_index: sectionCount
-          });
-
-          if (insertError) {
-            if (insertError.code === '23505') {
-              console.log(`Duplicate section skipped: "${sectionTitle}"`);
+            if (insertError) {
+              if (insertError.code === '23505') {
+                console.log(`Duplicate section skipped: "${sectionTitle}"`);
+              } else {
+                console.error(`Error inserting section "${sectionTitle}":`, insertError);
+              }
             } else {
-              console.error(`Error inserting section "${sectionTitle}":`, insertError);
-              // Continue processing other sections despite errors
+              totalSectionsCreated++;
+              console.log(`Successfully processed section: "${sectionTitle}"`);
             }
-          } else {
-            totalSectionsCreated++;
-            console.log(`Successfully processed section: "${sectionTitle}"`);
+
+          } catch (error) {
+            console.error(`Failed to process section "${sectionTitle}":`, error);
           }
 
-        } catch (error) {
-          console.error(`Failed to process section "${sectionTitle}":`, error);
-          // Continue with next section
+          // Small delay to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
 
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Only increment processed count if we've processed all sections for this policy
+        if (sectionsToProcess.length === sectionTitles.length) {
+          processedCount++;
+        }
       }
-
-      processedCount++;
       
-      // Update progress
+      // Update progress after processing this policy
       await supabase.from('policy_analysis_jobs').update({ 
-        progress_message: `Completed processing for: ${policy.category}`, 
+        progress_message: `Processed ${sectionCount || 0} sections from: ${policy.category}`, 
         policies_processed: processedCount,
         sections_created: totalSectionsCreated
       }).eq('id', jobId);
 
-      console.log(`Completed policy ${policy.category} with ${sectionCount} sections`);
+      console.log(`Completed processing batch for ${policy.category}`);
     }
 
-    // Check if all policies are processed
-    if (processedCount >= policies.length) {
+    // Check if all policies are processed or if there are more policies to work on
+    const totalPoliciesNeedingWork = policiesNeedingWork.length;
+    
+    if (processedCount >= policies.length || totalPoliciesNeedingWork === 0) {
       await supabase.from('policy_analysis_jobs').update({ 
         status: 'completed', 
         progress_message: `All policies processed successfully. Created ${totalSectionsCreated} sections.`,
@@ -383,16 +402,17 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     } else {
-      // Continue processing remaining work
-      console.log(`Processed ${processedCount}/${policies.length} policies. Continuing...`);
+      // More policies need work - schedule continuation
+      console.log(`Processed batch. ${totalPoliciesNeedingWork - 1} policies still need work. Scheduling continuation...`);
       
-      // Self-invoke to continue processing (autonomous execution)
-      EdgeRuntime.waitUntil(continuePolicyProcessing(jobId));
+      // Schedule next batch processing
+      scheduleContinuation(jobId);
       
       return new Response(JSON.stringify({ 
         success: true, 
-        message: `Batch completed. Continuing with remaining policies...`,
-        processed: processedCount,
+        message: `Batch completed. Scheduled continuation for remaining policies...`,
+        processed: 1,
+        remaining: totalPoliciesNeedingWork - 1,
         total: policies.length
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
