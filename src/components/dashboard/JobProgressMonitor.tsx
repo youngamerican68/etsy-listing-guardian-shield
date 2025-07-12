@@ -37,7 +37,8 @@ const JobProgressMonitor = ({ jobId, onJobComplete }: JobProgressMonitorProps) =
         setError('Could not load job status.');
         console.error('Error fetching job:', error);
       } else {
-        setJob(data);
+        // THIS IS THE FIX: Use a type assertion `as Job`
+        setJob(data as Job);
         if (data.status === 'completed' || data.status === 'failed') {
           onJobComplete();
         }
@@ -59,6 +60,7 @@ const JobProgressMonitor = ({ jobId, onJobComplete }: JobProgressMonitorProps) =
         },
         (payload) => {
           console.log('Job updated via real-time subscription:', payload.new);
+          // The same type assertion is used here for safety
           const updatedJob = payload.new as Job;
           setJob(updatedJob);
           // When the job is finished, call the callback and unsubscribe
@@ -115,4 +117,4 @@ const JobProgressMonitor = ({ jobId, onJobComplete }: JobProgressMonitorProps) =
   );
 };
 
-export default JobProgressMonitor;
+export default JobProgressMonitor;;
