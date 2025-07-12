@@ -1,3 +1,6 @@
+// src/pages/Index.tsx OR src/components/dashboard/PolicyParserManager.tsx
+// FINAL, "SMART MANAGER" VERSION
+
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -5,280 +8,148 @@ import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Download, FileText, Brain, Hash, Play, StopCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { policyParserService } from '@/services/policyParserService';
-import { StartJobResult, policyJobService } from '@/services/policyJobService';
+import { StartJobResult } from '@/services/policyJobService';
 import { supabase } from '@/integrations/supabase/client';
-import JobProgressMonitor from './JobProgressMonitor';
+import JobProgressMonitor from '@/components/dashboard/JobProgressMonitor';
+import { extractTableOfContents, findSectionContent, generateHash } from '@/lib/policyUtils';
+
+// Define Policy type
+type Policy = {
+  id: string;
+  category: string;
+  content: string;
+};
 
 const PolicyParserManager = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [result, setResult] = useState<StartJobResult | null>(null);
-  const [hasActiveJob, setHasActiveJob] = useState(false);
   const [processedPoliciesCount, setProcessedPoliciesCount] = useState(0);
-  const [currentPolicyCategory, setCurrentPolicyCategory] = useState<string>('');
+  const [currentProgressMessage, setCurrentProgressMessage] = useState('');
 
-  // Check for existing active jobs on component mount
-  useEffect(() => {
-    const checkForActiveJob = async () => {
-      try {
-        const latestJob = await policyJobService.getLatestJob();
-        if (latestJob && (latestJob.status === 'running' || latestJob.status === 'pending')) {
-          setCurrentJobId(latestJob.id);
-          setHasActiveJob(true);
-        }
-      } catch (error) {
-        console.error('Error checking for active jobs:', error);
-      }
-    };
-
-    checkForActiveJob();
-  }, []);
-
-  // Client-side orchestrator function
+  // The "Smart Manager" orchestrator
   const processAllPolicies = async (jobId: string) => {
-    if (!jobId) {
-      console.error("A Job ID is required to start processing.");
-      setResult({
-        success: false,
-        message: 'A Job ID is required to start processing.'
-      });
-      return;
-    }
-
-    let isJobComplete = false;
-    let processedCount = 0;
-
     setIsProcessing(true);
-    setHasActiveJob(true);
-    setProcessedPoliciesCount(0);
-    setCurrentPolicyCategory('');
-
-    while (!isJobComplete) {
-      try {
-        // STEP 1: Call the function in "Finder" mode to get the next policy
-        console.log("Finding the next policy to process...");
-        const findResponse = await supabase.functions.invoke('process-policies-ai', {
-          body: { jobId }
-        });
-        
-        if (findResponse.error) {
-          throw new Error(findResponse.error.message || 'Failed to find the next policy.');
-        }
-        
-        const findResult = findResponse.data;
-        
-        if (findResult.completed) {
-          isJobComplete = true;
-          console.log("All policies have been processed successfully!");
-          setResult({
-            success: true,
-            message: `Successfully processed all policies!`
-          });
-          break;
-        }
-        
-        if (findResult.nextPolicyId) {
-          setCurrentPolicyCategory(findResult.policyCategory);
-          
-          // STEP 2: Process sections one by one for this policy
-          let policyCompleted = false;
-          while (!policyCompleted) {
-            console.log(`Processing next section from policy: ${findResult.policyCategory}`);
-            
-            const processResponse = await supabase.functions.invoke('process-policies-ai', {
-              body: { 
-                jobId, 
-                policyId: findResult.nextPolicyId 
-              }
-            });
-            
-            if (processResponse.error) {
-              throw new Error(processResponse.error.message || `Failed to process policy ${findResult.policyCategory}.`);
-            }
-
-            const processResult = processResponse.data;
-            
-            if (processResult.policyCompleted) {
-              policyCompleted = true;
-              processedCount++;
-              setProcessedPoliciesCount(processedCount);
-              console.log(`Completed policy: ${findResult.policyCategory}`);
-            } else if (processResult.sectionProcessed) {
-              console.log(`Processed section: ${processResult.sectionProcessed}`);
-            }
-
-            // Small delay between sections
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        } else {
-          console.error("Finder did not return a next policy or a completion flag. Stopping.");
-          break;
-        }
-        
-        // Small delay between policies
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-      } catch (error) {
-        console.error("An error occurred during the orchestration:", error);
-        setResult({
-          success: false,
-          message: error instanceof Error ? error.message : 'An error occurred during processing.'
-        });
-        isJobComplete = true; // Stop the loop on error
-      }
-    }
-
-    setIsProcessing(false);
-    setHasActiveJob(false);
-    setCurrentPolicyCategory('');
-  };
-
-  const handleParseAll = async () => {
-    setIsProcessing(true);
-    setResult(null);
-    setCurrentJobId(null);
-    setHasActiveJob(false);
+    setCurrentProgressMessage('Starting job...');
 
     try {
-      // First create the job
-      const parseResult = await policyParserService.parseAllEtsyPolicies();
-      setResult(parseResult);
-      
-      if (parseResult.success && parseResult.jobId) {
-        setCurrentJobId(parseResult.jobId);
-        // Start the client-side orchestration
-        await processAllPolicies(parseResult.jobId);
+      // 1. Get all active policies from the database
+      setCurrentProgressMessage('Fetching all active policies...');
+      const { data: policies, error: policiesError } = await supabase
+        .from('etsy_policies').select('id, category, content').eq('is_active', true);
+      if (policiesError) throw policiesError;
+
+      await supabase.from('policy_analysis_jobs').update({ total_policies: policies.length }).eq('id', jobId);
+
+      let totalProcessedCount = 0;
+      // 2. Loop through each policy
+      for (const policy of policies) {
+        // Check if this policy is already processed to allow for resumability
+        const { count } = await supabase.from('policy_sections').select('id', { count: 'exact', head: true }).eq('policy_id', policy.id);
+        if (count && count > 3) {
+            console.log(`Skipping already processed policy: ${policy.category}`);
+            totalProcessedCount++;
+            setProcessedPoliciesCount(totalProcessedCount);
+            continue;
+        }
+        
+        // Clean up any partial sections from a failed previous run
+        await supabase.from('policy_sections').delete().eq('policy_id', policy.id);
+
+        // 3. Extract the Table of Contents (now on the client)
+        setCurrentProgressMessage(`[${policy.category}] Extracting table of contents...`);
+        const sectionTitles = await extractTableOfContents(policy.content, policy.category);
+        if (sectionTitles.length === 0) {
+            console.warn(`No sections found for policy: ${policy.category}`);
+            continue;
+        }
+
+        // 4. Loop through each section title
+        for (let i = 0; i < sectionTitles.length; i++) {
+          const sectionTitle = sectionTitles[i];
+          setCurrentProgressMessage(`[${policy.category}] Processing section ${i + 1}/${sectionTitles.length}: ${sectionTitle}`);
+          
+          const sectionContent = findSectionContent(policy.content, sectionTitle);
+          const contentHash = await generateHash(sectionContent);
+
+          // 5. Call the "Dumb Worker" Edge Function with everything it needs
+          const { error: workerError } = await supabase.functions.invoke('process-policies-ai', {
+            body: { jobId, policyId: policy.id, sectionTitle, sectionContent, policyCategory: policy.category, contentHash, orderIndex: i + 1 }
+          });
+
+          if (workerError) {
+            // Log the error but try to continue with the next section/policy
+            console.error(`Failed to process section "${sectionTitle}":`, workerError);
+          }
+          await new Promise(resolve => setTimeout(resolve, 500)); // Rate limit
+        }
+        totalProcessedCount++;
+        setProcessedPoliciesCount(totalProcessedCount);
       }
+      
+      setCurrentProgressMessage('All policies processed successfully!');
+      await supabase.from('policy_analysis_jobs').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', jobId);
+      setResult({ success: true, message: 'Job completed!' });
+
     } catch (error) {
-      console.error('Error starting analysis:', error);
-      setResult({
-        success: false,
-        message: error instanceof Error ? error.message : 'Unknown error occurred'
-      });
+      console.error("A critical error occurred during orchestration:", error);
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+      setCurrentProgressMessage(`Error: ${errorMessage}`);
+      setResult({ success: false, message: errorMessage });
+      if (jobId) {
+        await supabase.from('policy_analysis_jobs').update({ status: 'failed', error_message: errorMessage }).eq('id', jobId);
+      }
+    } finally {
       setIsProcessing(false);
-      setHasActiveJob(false);
+    }
+  };
+
+  const handleStartJob = async () => {
+    setResult(null);
+    try {
+      const { data: jobData, error } = await supabase.from('policy_analysis_jobs').insert({ status: 'pending' }).select().single();
+      if (error) throw error;
+      
+      const newJobId = jobData.id;
+      setCurrentJobId(newJobId);
+      await processAllPolicies(newJobId);
+
+    } catch (error) {
+      console.error('Failed to create job:', error);
+      setResult({ success: false, message: 'Could not start a new job.' });
     }
   };
 
   const handleJobComplete = () => {
-    setHasActiveJob(false);
-    setCurrentJobId(null);
-    // Trigger page refresh or data refetch when job completes
-    window.location.reload();
+    console.log("Job marked as complete by monitor.");
+    setIsProcessing(false);
   };
-
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Brain className="h-5 w-5" />
-          Policy Parser & AI Processor
-        </CardTitle>
+        <CardTitle className="flex items-center gap-2"><Brain />Policy Parser & AI Processor</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="flex items-center gap-3 p-4 border rounded-lg">
-            <Download className="h-8 w-8 text-blue-500" />
-            <div>
-              <p className="font-medium">Web Scraping</p>
-              <p className="text-sm text-muted-foreground">
-                Extract Etsy's ToS & policies
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 p-4 border rounded-lg">
-            <FileText className="h-8 w-8 text-green-500" />
-            <div>
-              <p className="font-medium">AI Processing</p>
-              <p className="text-sm text-muted-foreground">
-                Categorize & summarize rules
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 p-4 border rounded-lg">
-            <Hash className="h-8 w-8 text-purple-500" />
-            <div>
-              <p className="font-medium">Keyword Extraction</p>
-              <p className="text-sm text-muted-foreground">
-                Extract prohibited terms
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            This process will scrape Etsy's current Terms of Service and related policies, 
-            then use AI to categorize rules, generate plain English summaries, and extract 
-            prohibited keywords. This may take several minutes to complete.
-          </AlertDescription>
-        </Alert>
-
+        <Alert><AlertCircle className="h-4 w-4" /><AlertDescription>Click "Start Processing" to begin a new job. The system will fetch all policies, then process each section one-by-one using AI. This can take several minutes.</AlertDescription></Alert>
         {isProcessing && (
           <Alert>
-            <AlertCircle className="h-4 w-4" />
+            <AlertCircle className="h-4 w-4 animate-pulse" />
             <AlertDescription>
-              {currentPolicyCategory ? 
-                `Processing policy: ${currentPolicyCategory}... (${processedPoliciesCount} completed)` : 
-                'Starting autonomous analysis job...'
-              }
+              {currentProgressMessage || 'Processing...'}
             </AlertDescription>
           </Alert>
         )}
-
-        {hasActiveJob && !isProcessing && (
-          <Alert>
-            <Brain className="h-4 w-4" />
-            <AlertDescription>
-              Autonomous processing active. The system will continuously work until all policies are processed.
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {result && !result.success && (
-          <Alert variant="destructive">
+        {result && (
+          <Alert variant={result.success ? 'default' : 'destructive'}>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{result.message}</AlertDescription>
           </Alert>
         )}
-
-        {currentJobId && (
-          <JobProgressMonitor jobId={currentJobId} onJobComplete={handleJobComplete} />
-        )}
-
-        <div className="flex justify-between items-center">
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Target Policies</p>
-            <div className="flex flex-wrap gap-1">
-              {['Terms of Use', 'Prohibited Items', 'Handmade Policy', 'IP Policy', 'Fees', 'Community Guidelines'].map((policy) => (
-                <Badge key={policy} variant="outline" className="text-xs">
-                  {policy}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          <Button 
-            onClick={handleParseAll}
-            disabled={isProcessing || hasActiveJob}
-            size="lg"
-            className="flex items-center gap-2"
-          >
-            {hasActiveJob ? (
-              <>
-                <StopCircle className="h-4 w-4" />
-                Processing Active
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4" />
-                {isProcessing ? 'Starting...' : 'Start Autonomous Processing'}
-              </>
-            )}
+        {currentJobId && <JobProgressMonitor jobId={currentJobId} onJobComplete={handleJobComplete} />}
+        <div className="flex justify-end">
+          <Button onClick={handleStartJob} disabled={isProcessing} size="lg">
+            {isProcessing ? <><StopCircle className="h-4 w-4 mr-2 animate-spin" />Processing...</> : <><Play className="h-4 w-4 mr-2" />Start Processing</>}
           </Button>
         </div>
       </CardContent>
