@@ -107,21 +107,26 @@ serve(async (req) => {
       
       if (policiesError) throw policiesError;
 
-      // Track which policies have been processed by counting their sections
-      // A policy is considered "processed" if it has at least 3 sections
+      // Find the first policy that hasn't been completed
+      // Check if any policy was processed in the last 2 minutes to avoid race conditions
       let unprocessedPolicy = null;
       
       for (const policy of policies) {
         const { data: sections } = await supabase
           .from('policy_sections')
-          .select('id')
+          .select('id, created_at')
           .eq('policy_id', policy.id);
         
         const sectionCount = sections ? sections.length : 0;
         console.log(`Policy ${policy.category} has ${sectionCount} sections`);
         
-        // If this policy has less than 3 sections, it needs processing
-        if (sectionCount < 3) {
+        // Check if this policy was recently processed (within last 2 minutes)
+        const recentSections = sections?.filter(s => 
+          new Date(s.created_at) > new Date(Date.now() - 2 * 60 * 1000)
+        ) || [];
+        
+        // If this policy has less than 5 sections AND hasn't been processed recently
+        if (sectionCount < 5 && recentSections.length === 0) {
           unprocessedPolicy = policy;
           break; // Take the first unprocessed policy
         }
