@@ -55,12 +55,6 @@ const PolicyParserManager = () => {
 
     while (!isJobComplete) {
       try {
-        // Get auth token
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) {
-          throw new Error('No valid session found');
-        }
-
         // STEP 1: Call the function in "Finder" mode to get the next policy
         console.log("Finding the next policy to process...");
         const findResponse = await supabase.functions.invoke('process-policies-ai', {
@@ -78,36 +72,50 @@ const PolicyParserManager = () => {
           console.log("All policies have been processed successfully!");
           setResult({
             success: true,
-            message: `Successfully processed ${processedCount} policies!`
+            message: `Successfully processed all policies!`
           });
           break;
         }
         
         if (findResult.nextPolicyId) {
-          // STEP 2: Call the function in "Worker" mode to process the specific policy
-          console.log(`Found policy: ${findResult.policyCategory} (${findResult.nextPolicyId}). Starting processing...`);
           setCurrentPolicyCategory(findResult.policyCategory);
-
-          const processResponse = await supabase.functions.invoke('process-policies-ai', {
-            body: { 
-              jobId, 
-              policyId: findResult.nextPolicyId 
-            }
-          });
           
-          if (processResponse.error) {
-            throw new Error(processResponse.error.message || `Failed to process policy ${findResult.policyCategory}.`);
-          }
+          // STEP 2: Process sections one by one for this policy
+          let policyCompleted = false;
+          while (!policyCompleted) {
+            console.log(`Processing next section from policy: ${findResult.policyCategory}`);
+            
+            const processResponse = await supabase.functions.invoke('process-policies-ai', {
+              body: { 
+                jobId, 
+                policyId: findResult.nextPolicyId 
+              }
+            });
+            
+            if (processResponse.error) {
+              throw new Error(processResponse.error.message || `Failed to process policy ${findResult.policyCategory}.`);
+            }
 
-          processedCount++;
-          setProcessedPoliciesCount(processedCount);
-          console.log(`Successfully processed ${findResult.policyCategory}. Result:`, processResponse.data.message);
+            const processResult = processResponse.data;
+            
+            if (processResult.policyCompleted) {
+              policyCompleted = true;
+              processedCount++;
+              setProcessedPoliciesCount(processedCount);
+              console.log(`Completed policy: ${findResult.policyCategory}`);
+            } else if (processResult.sectionProcessed) {
+              console.log(`Processed section: ${processResult.sectionProcessed}`);
+            }
+
+            // Small delay between sections
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
         } else {
           console.error("Finder did not return a next policy or a completion flag. Stopping.");
           break;
         }
         
-        // Small delay to be respectful to the APIs
+        // Small delay between policies
         await new Promise(resolve => setTimeout(resolve, 1000));
 
       } catch (error) {
