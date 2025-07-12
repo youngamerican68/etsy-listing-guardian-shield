@@ -22,9 +22,19 @@ interface ListingCheck {
 const Index = () => {
   const { user, loading } = useAuth();
   const [checks, setChecks] = useState<ListingCheck[]>([]);
+  const [isGeneratingProof, setIsGeneratingProof] = useState(false);
 
   const handleCheckComplete = (result: ListingCheck) => {
     setChecks(prev => [result, ...prev]);
+  };
+
+  const handleGenerateProof = (check: ListingCheck) => {
+    setIsGeneratingProof(true);
+    // TODO: Implement proof generation logic
+    console.log('Generating proof for check:', check);
+    setTimeout(() => {
+      setIsGeneratingProof(false);
+    }, 2000);
   };
 
   const scrollToChecker = () => {
@@ -71,7 +81,12 @@ const Index = () => {
                 <h3 className="text-2xl font-bold text-gray-900 mb-6">
                   Recent Checks
                 </h3>
-                <CheckHistoryList checks={checks} />
+                <CheckHistoryList 
+                  checkHistory={checks}
+                  userTier="free"
+                  isGeneratingProof={isGeneratingProof}
+                  onGenerateProof={handleGenerateProof}
+                />
               </div>
             )}
 
