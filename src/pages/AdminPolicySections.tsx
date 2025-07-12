@@ -6,7 +6,7 @@ import { toast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Edit, Trash2 } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import PolicySectionForm from '@/components/admin/PolicySectionForm';
 import PolicySectionList from '@/components/admin/PolicySectionList';
 
@@ -164,7 +164,7 @@ const AdminPolicySections = () => {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 max-w-7xl">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Policy Sections Management</h1>
       </div>
@@ -185,46 +185,62 @@ const AdminPolicySections = () => {
       </div>
 
       {selectedPolicy && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-200px)]">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 min-h-[600px]">
           {/* Left Panel - Policy Content */}
-          <Card className="h-full">
+          <Card className="flex flex-col">
             <CardHeader>
               <CardTitle>Policy Content</CardTitle>
               <p className="text-sm text-muted-foreground">{selectedPolicy.title}</p>
             </CardHeader>
-            <CardContent className="h-[calc(100%-100px)] overflow-y-auto">
-              <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                {selectedPolicy.content}
+            <CardContent className="flex-1 overflow-hidden">
+              <div className="h-full overflow-y-auto pr-2">
+                <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                  {selectedPolicy.content}
+                </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Right Panel - Sections Management */}
-          <Card className="h-full">
-            <CardHeader className="flex flex-row items-center justify-between">
+          <Card className="flex flex-col">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
               <CardTitle>Policy Sections</CardTitle>
               <Button onClick={handleAddSection} size="sm">
                 <Plus className="w-4 h-4 mr-2" />
                 Add Section
               </Button>
             </CardHeader>
-            <CardContent className="h-[calc(100%-100px)] overflow-y-auto">
-              {showForm ? (
-                <PolicySectionForm
-                  policy={selectedPolicy}
-                  section={editingSection}
-                  onClose={handleFormClose}
-                />
-              ) : (
-                <PolicySectionList
-                  sections={sections}
-                  onEdit={handleEditSection}
-                  onDelete={handleDeleteSection}
-                />
-              )}
+            <CardContent className="flex-1 overflow-hidden">
+              <div className="h-full overflow-y-auto">
+                {showForm ? (
+                  <PolicySectionForm
+                    policy={selectedPolicy}
+                    section={editingSection}
+                    onClose={handleFormClose}
+                  />
+                ) : (
+                  <PolicySectionList
+                    sections={sections}
+                    onEdit={handleEditSection}
+                    onDelete={handleDeleteSection}
+                  />
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {!selectedPolicy && (
+        <Card className="h-96 flex items-center justify-center">
+          <div className="text-center text-muted-foreground">
+            <p className="text-lg font-medium mb-2">Select a policy to get started</p>
+            <p className="text-sm">
+              Choose a policy from the dropdown above to view its content<br />
+              and manage its sections.
+            </p>
+          </div>
+        </Card>
       )}
     </div>
   );
