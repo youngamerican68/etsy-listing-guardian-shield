@@ -6,6 +6,7 @@ import { AlertCircle, Download, FileText, Brain, Hash, Play, StopCircle } from '
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { policyParserService } from '@/services/policyParserService';
 import { StartJobResult, policyJobService } from '@/services/policyJobService';
+import { supabase } from '@/integrations/supabase/client';
 import JobProgressMonitor from './JobProgressMonitor';
 
 const PolicyParserManager = () => {
@@ -13,6 +14,8 @@ const PolicyParserManager = () => {
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [result, setResult] = useState<StartJobResult | null>(null);
   const [hasActiveJob, setHasActiveJob] = useState(false);
+  const [processedPoliciesCount, setProcessedPoliciesCount] = useState(0);
+  const [currentPolicyCategory, setCurrentPolicyCategory] = useState<string>('');
 
   // Check for existing active jobs on component mount
   useEffect(() => {
@@ -31,6 +34,97 @@ const PolicyParserManager = () => {
     checkForActiveJob();
   }, []);
 
+  // Client-side orchestrator function
+  const processAllPolicies = async (jobId: string) => {
+    if (!jobId) {
+      console.error("A Job ID is required to start processing.");
+      setResult({
+        success: false,
+        message: 'A Job ID is required to start processing.'
+      });
+      return;
+    }
+
+    let isJobComplete = false;
+    let processedCount = 0;
+
+    setIsProcessing(true);
+    setHasActiveJob(true);
+    setProcessedPoliciesCount(0);
+    setCurrentPolicyCategory('');
+
+    while (!isJobComplete) {
+      try {
+        // Get auth token
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          throw new Error('No valid session found');
+        }
+
+        // STEP 1: Call the function in "Finder" mode to get the next policy
+        console.log("Finding the next policy to process...");
+        const findResponse = await supabase.functions.invoke('process-policies-ai', {
+          body: { jobId }
+        });
+        
+        if (findResponse.error) {
+          throw new Error(findResponse.error.message || 'Failed to find the next policy.');
+        }
+        
+        const findResult = findResponse.data;
+        
+        if (findResult.completed) {
+          isJobComplete = true;
+          console.log("All policies have been processed successfully!");
+          setResult({
+            success: true,
+            message: `Successfully processed ${processedCount} policies!`
+          });
+          break;
+        }
+        
+        if (findResult.nextPolicyId) {
+          // STEP 2: Call the function in "Worker" mode to process the specific policy
+          console.log(`Found policy: ${findResult.policyCategory} (${findResult.nextPolicyId}). Starting processing...`);
+          setCurrentPolicyCategory(findResult.policyCategory);
+
+          const processResponse = await supabase.functions.invoke('process-policies-ai', {
+            body: { 
+              jobId, 
+              policyId: findResult.nextPolicyId 
+            }
+          });
+          
+          if (processResponse.error) {
+            throw new Error(processResponse.error.message || `Failed to process policy ${findResult.policyCategory}.`);
+          }
+
+          processedCount++;
+          setProcessedPoliciesCount(processedCount);
+          console.log(`Successfully processed ${findResult.policyCategory}. Result:`, processResponse.data.message);
+        } else {
+          console.error("Finder did not return a next policy or a completion flag. Stopping.");
+          break;
+        }
+        
+        // Small delay to be respectful to the APIs
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+      } catch (error) {
+        console.error("An error occurred during the orchestration:", error);
+        setResult({
+          success: false,
+          message: error instanceof Error ? error.message : 'An error occurred during processing.'
+        });
+        isJobComplete = true; // Stop the loop on error
+      }
+    }
+
+    setIsProcessing(false);
+    setHasActiveJob(false);
+    setCurrentPolicyCategory('');
+  };
+
   const handleParseAll = async () => {
     setIsProcessing(true);
     setResult(null);
@@ -38,12 +132,14 @@ const PolicyParserManager = () => {
     setHasActiveJob(false);
 
     try {
+      // First create the job
       const parseResult = await policyParserService.parseAllEtsyPolicies();
       setResult(parseResult);
       
       if (parseResult.success && parseResult.jobId) {
         setCurrentJobId(parseResult.jobId);
-        setHasActiveJob(true);
+        // Start the client-side orchestration
+        await processAllPolicies(parseResult.jobId);
       }
     } catch (error) {
       console.error('Error starting analysis:', error);
@@ -51,8 +147,8 @@ const PolicyParserManager = () => {
         success: false,
         message: error instanceof Error ? error.message : 'Unknown error occurred'
       });
-    } finally {
       setIsProcessing(false);
+      setHasActiveJob(false);
     }
   };
 
@@ -117,11 +213,16 @@ const PolicyParserManager = () => {
         {isProcessing && (
           <Alert>
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>Starting autonomous analysis job...</AlertDescription>
+            <AlertDescription>
+              {currentPolicyCategory ? 
+                `Processing policy: ${currentPolicyCategory}... (${processedPoliciesCount} completed)` : 
+                'Starting autonomous analysis job...'
+              }
+            </AlertDescription>
           </Alert>
         )}
 
-        {hasActiveJob && (
+        {hasActiveJob && !isProcessing && (
           <Alert>
             <Brain className="h-4 w-4" />
             <AlertDescription>
