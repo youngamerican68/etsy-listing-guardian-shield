@@ -69,6 +69,24 @@ serve(async (req) => {
     if (!policyId) {
       console.log(`[FINDER MODE] Finding next section for job: ${jobId}`);
       
+      // Check if job is still active before proceeding
+      const { data: currentJob } = await supabase
+        .from('policy_analysis_jobs')
+        .select('status')
+        .eq('id', jobId)
+        .single();
+      
+      if (currentJob?.status === 'failed' || currentJob?.status === 'completed') {
+        console.log(`[FINDER MODE] Job ${jobId} is ${currentJob.status}, stopping execution`);
+        return new Response(JSON.stringify({
+          success: false,
+          completed: true,
+          message: `Job has been ${currentJob.status}`
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      
       // First time running this job? Clear any existing sections for a fresh start
       const { data: jobData } = await supabase
         .from('policy_analysis_jobs')
