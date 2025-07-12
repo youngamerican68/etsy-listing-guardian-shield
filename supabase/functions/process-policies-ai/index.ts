@@ -185,9 +185,26 @@ serve(async (req) => {
           progress_message: `Processing ${policy.category}: ${sectionTitle} (${i + 1}/${sectionTitles.length})`
         }).eq('id', jobId);
 
-        // Call OpenAI to analyze the section
-        const aiResponse = await analyzeSection(sectionTitle, sectionContent, policy.category, openAIApiKey!);
-        const parsed = JSON.parse(repairJsonString(aiResponse));
+        let parsed;
+        try {
+          // Call OpenAI to analyze the section
+          console.log(`Calling OpenAI for section: ${sectionTitle}`);
+          const aiResponse = await analyzeSection(sectionTitle, sectionContent, policy.category, openAIApiKey!);
+          console.log(`OpenAI raw response: ${aiResponse.substring(0, 200)}...`);
+          
+          parsed = JSON.parse(repairJsonString(aiResponse));
+          console.log(`Parsed successfully: ${JSON.stringify(parsed).substring(0, 100)}...`);
+        } catch (aiError) {
+          console.error(`AI processing failed for section "${sectionTitle}":`, aiError.message);
+          // Continue with default values if AI fails
+          parsed = {
+            section_title: sectionTitle,
+            section_content: sectionContent,
+            plain_english_summary: `Analysis unavailable for ${sectionTitle}`,
+            category: 'general',
+            risk_level: 'medium'
+          };
+        }
 
         // Insert the processed section into the database
         const { error: insertError } = await supabase.from('policy_sections').insert({
