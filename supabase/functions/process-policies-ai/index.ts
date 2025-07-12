@@ -91,13 +91,16 @@ serve(async (req) => {
 
       // Find the first policy that has few or no sections processed
       for (const policy of policies) {
-        const { count } = await supabase
+        const { data: sections } = await supabase
           .from('policy_sections')
-          .select('id', { count: 'exact', head: true })
+          .select('id')
           .eq('policy_id', policy.id);
         
+        const sectionCount = sections ? sections.length : 0;
+        console.log(`Policy ${policy.category} has ${sectionCount} sections`);
+        
         // If this policy has less than 3 sections, it needs processing
-        if (!count || count < 3) {
+        if (sectionCount < 3) {
           console.log(`[FINDER MODE] Found policy to process: ${policy.category}`);
           return new Response(JSON.stringify({
             success: true,
