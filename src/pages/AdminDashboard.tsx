@@ -135,6 +135,12 @@ const AdminDashboard = () => {
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Admin Dashboard</h1>
         <div className="flex gap-2">
+          <Link to="/admin/policy-sections">
+            <Button variant="outline">
+              <FileText className="w-4 h-4 mr-2" />
+              Policy Sections
+            </Button>
+          </Link>
           <Link to="/admin/rules">
             <Button variant="outline">
               <Shield className="w-4 h-4 mr-2" />

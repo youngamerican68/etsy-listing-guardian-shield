@@ -13,6 +13,7 @@ import AuthTest from "./pages/AuthTest";
 import TestCompliance from "./pages/TestCompliance";
 import NotFound from "./pages/NotFound";
 import AdminDashboard from "./pages/AdminDashboard";
+import AdminPolicySections from "./pages/AdminPolicySections";
 import Analytics from "./pages/Analytics";
 import Policies from "./pages/Policies";
 
@@ -31,6 +32,7 @@ const App = () => (
             <Route path="/policies" element={<Policies />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/rules" element={<AdminRules />} />
+            <Route path="/admin/policy-sections" element={<AdminPolicySections />} />
             <Route path="/admin/analytics" element={<Analytics />} />
             <Route path="/test" element={<AuthTest />} />
             <Route path="/test-compliance" element={<TestCompliance />} />
