@@ -35,7 +35,7 @@ function repairJsonString(jsonString: string): string {
 
 // Helper to analyze a SINGLE section - this is the core of the function now
 async function analyzeSection(sectionTitle: string, sectionContent: string, policyCategory: string, apiKey: string) {
-  const prompt = `Analyze this specific section from Etsy's ${policyCategory} policy. Section Title: ${sectionTitle}. Section Content: ${sectionContent}. Provide a JSON response with this structure: { "section_title": "${sectionTitle}", "section_content": "full section text", "plain_english_summary": "clear 2-3 sentence summary of what this section means for sellers", "category": "one of: account_management, listing_requirements, prohibited_content, payment_fees, intellectual_property, community_guidelines, legal_terms", "risk_level": "one of: low, medium, high" }. Focus on practical implications for Etsy sellers.`;
+  const prompt = `Analyze this specific section from Etsy's ${policyCategory} policy. Section Title: ${sectionTitle}. Section Content: ${sectionContent}. Provide a JSON response with this structure: { "section_title": "${sectionTitle}", "section_content": "full section text", "plain_english_summary": "clear 2-3 sentence summary of what this section means for sellers", "category": "one of: account_integrity, intellectual_property, prohibited_items, handmade_reselling, fees_payments, community_conduct", "risk_level": "one of: low, medium, high, critical" }. Focus on practical implications for Etsy sellers.`;
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -204,7 +204,7 @@ serve(async (req) => {
             section_title: sectionTitle,
             section_content: sectionContent,
             plain_english_summary: `Analysis unavailable for ${sectionTitle}`,
-            category: 'general',
+            category: 'prohibited_items', // Use a valid category
             risk_level: 'medium'
           };
         }
@@ -215,7 +215,7 @@ serve(async (req) => {
           section_title: parsed.section_title || sectionTitle,
           section_content: parsed.section_content || sectionContent,
           plain_english_summary: parsed.plain_english_summary || '',
-          category: parsed.category || 'general',
+          category: parsed.category || 'prohibited_items',
           risk_level: parsed.risk_level || 'medium',
           content_hash: contentHash,
           order_index: i + 1
