@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { AlertCircle, Download, FileText, Brain, Hash, Play } from 'lucide-react';
+import { AlertCircle, Download, FileText, Brain, Hash, Play, StopCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { policyParserService } from '@/services/policyParserService';
 import { StartJobResult, policyJobService } from '@/services/policyJobService';
@@ -12,15 +12,30 @@ const PolicyParserManager = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [result, setResult] = useState<StartJobResult | null>(null);
-  const [autoRetryCount, setAutoRetryCount] = useState(0);
-  const [isAutoRetrying, setIsAutoRetrying] = useState(false);
+  const [hasActiveJob, setHasActiveJob] = useState(false);
+
+  // Check for existing active jobs on component mount
+  useEffect(() => {
+    const checkForActiveJob = async () => {
+      try {
+        const latestJob = await policyJobService.getLatestJob();
+        if (latestJob && (latestJob.status === 'running' || latestJob.status === 'pending')) {
+          setCurrentJobId(latestJob.id);
+          setHasActiveJob(true);
+        }
+      } catch (error) {
+        console.error('Error checking for active jobs:', error);
+      }
+    };
+
+    checkForActiveJob();
+  }, []);
 
   const handleParseAll = async () => {
     setIsProcessing(true);
     setResult(null);
     setCurrentJobId(null);
-    setAutoRetryCount(0);
-    setIsAutoRetrying(false);
+    setHasActiveJob(false);
 
     try {
       const parseResult = await policyParserService.parseAllEtsyPolicies();
@@ -28,8 +43,7 @@ const PolicyParserManager = () => {
       
       if (parseResult.success && parseResult.jobId) {
         setCurrentJobId(parseResult.jobId);
-        // Start auto-retry process
-        startAutoRetryProcess(parseResult.jobId);
+        setHasActiveJob(true);
       }
     } catch (error) {
       console.error('Error starting analysis:', error);
@@ -42,68 +56,13 @@ const PolicyParserManager = () => {
     }
   };
 
-  const startAutoRetryProcess = async (jobId: string) => {
-    const maxAttempts = 20; // Adjust based on typical completion time
-    const retryInterval = 5 * 60 * 1000; // 5 minutes between retries
-    
-    setIsAutoRetrying(true);
-    
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      setAutoRetryCount(attempt);
-      
-      try {
-        // Check job status first
-        const jobStatus = await policyJobService.getJobStatus(jobId);
-        
-        if (jobStatus?.status === 'completed') {
-          console.log('Job completed successfully');
-          setIsAutoRetrying(false);
-          handleJobComplete();
-          return;
-        }
-        
-        if (jobStatus?.status === 'failed' || !jobStatus) {
-          console.log(`Job failed or not found, triggering new job (attempt ${attempt})`);
-          
-          // Trigger a new processing job
-          const parseResult = await policyParserService.parseAllEtsyPolicies();
-          
-          if (parseResult.success && parseResult.jobId) {
-            setCurrentJobId(parseResult.jobId);
-            // Continue monitoring the new job
-            await new Promise(resolve => setTimeout(resolve, retryInterval));
-            continue;
-          }
-        } else if (jobStatus?.status === 'running') {
-          console.log(`Job still running (attempt ${attempt}), waiting...`);
-          await new Promise(resolve => setTimeout(resolve, retryInterval));
-          continue;
-        }
-        
-      } catch (error) {
-        console.error(`Auto-retry attempt ${attempt} failed:`, error);
-        if (attempt === maxAttempts) {
-          setResult({
-            success: false,
-            message: `Auto-retry failed after ${maxAttempts} attempts`
-          });
-          break;
-        }
-      }
-      
-      // Wait before next attempt
-      await new Promise(resolve => setTimeout(resolve, retryInterval));
-    }
-    
-    setIsAutoRetrying(false);
-  };
-
   const handleJobComplete = () => {
-    setIsAutoRetrying(false);
-    setAutoRetryCount(0);
+    setHasActiveJob(false);
+    setCurrentJobId(null);
     // Trigger page refresh or data refetch when job completes
     window.location.reload();
   };
+
 
   return (
     <Card>
@@ -158,17 +117,15 @@ const PolicyParserManager = () => {
         {isProcessing && (
           <Alert>
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>Starting analysis job...</AlertDescription>
+            <AlertDescription>Starting autonomous analysis job...</AlertDescription>
           </Alert>
         )}
 
-        {isAutoRetrying && (
+        {hasActiveJob && (
           <Alert>
-            <AlertCircle className="h-4 w-4" />
+            <Brain className="h-4 w-4" />
             <AlertDescription>
-              Auto-retry mode active (attempt {autoRetryCount}/20). 
-              Processing will continue automatically until completion. 
-              Next retry in 5 minutes if job fails.
+              Autonomous processing active. The system will continuously work until all policies are processed.
             </AlertDescription>
           </Alert>
         )}
@@ -198,12 +155,21 @@ const PolicyParserManager = () => {
 
           <Button 
             onClick={handleParseAll}
-            disabled={isProcessing || isAutoRetrying}
+            disabled={isProcessing || hasActiveJob}
             size="lg"
             className="flex items-center gap-2"
           >
-            <Play className="h-4 w-4" />
-            {isProcessing ? 'Starting...' : isAutoRetrying ? 'Auto-Retrying...' : 'Parse All Policies'}
+            {hasActiveJob ? (
+              <>
+                <StopCircle className="h-4 w-4" />
+                Processing Active
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4" />
+                {isProcessing ? 'Starting...' : 'Start Autonomous Processing'}
+              </>
+            )}
           </Button>
         </div>
       </CardContent>
