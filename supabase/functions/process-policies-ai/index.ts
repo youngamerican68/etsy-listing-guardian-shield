@@ -44,52 +44,159 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
   
   try {
-    // This function now expects everything it needs to process ONE section
-    const { jobId, policyId, sectionTitle, sectionContent, policyCategory, contentHash, orderIndex } = await req.json();
+    const body = await req.json();
+    const { jobId, policyId, sectionTitle, sectionContent, policyCategory, contentHash, orderIndex } = body;
 
-    if (!jobId || !policyId || !sectionTitle || !sectionContent || !policyCategory || !contentHash) {
-      throw new Error('Missing required parameters for section processing.');
-    }
+    // FINDER MODE: If only jobId is provided, find the next section to process
+    if (jobId && !policyId) {
+      console.log(`[FINDER MODE] Finding next section for job: ${jobId}`);
+      
+      // Get all active policies
+      const { data: policies, error: policiesError } = await supabase
+        .from('etsy_policies')
+        .select('id, category, content')
+        .eq('is_active', true);
+      
+      if (policiesError) throw policiesError;
 
-    // Update job progress
-    await supabase.from('policy_analysis_jobs').update({
-      progress_message: `Analyzing section: ${sectionTitle}`
-    }).eq('id', jobId);
-
-    // Call OpenAI to analyze the section
-    const aiResponse = await analyzeSection(sectionTitle, sectionContent, policyCategory, openAIApiKey!);
-    const parsed = JSON.parse(repairJsonString(aiResponse));
-
-    // Insert the processed section into the database
-    const { error: insertError } = await supabase.from('policy_sections').insert({
-      policy_id: policyId,
-      section_title: parsed.section_title || sectionTitle,
-      section_content: parsed.section_content || sectionContent,
-      plain_english_summary: parsed.plain_english_summary || '',
-      category: parsed.category || 'general',
-      risk_level: parsed.risk_level || 'medium',
-      content_hash: contentHash,
-      order_index: orderIndex
-    });
-
-    if (insertError) {
-      // Handle duplicates gracefully without failing the whole job
-      if (insertError.code === '23505') {
-        console.warn(`Duplicate section skipped: ${sectionTitle}`);
-      } else {
-        throw insertError;
+      // Find the first policy that has few or no sections processed
+      for (const policy of policies) {
+        const { count } = await supabase
+          .from('policy_sections')
+          .select('id', { count: 'exact', head: true })
+          .eq('policy_id', policy.id);
+        
+        // If this policy has less than 3 sections, it needs processing
+        if (!count || count < 3) {
+          console.log(`[FINDER MODE] Found policy to process: ${policy.category}`);
+          return new Response(JSON.stringify({
+            success: true,
+            nextPolicyId: policy.id,
+            policyCategory: policy.category,
+            completed: false
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
       }
+      
+      // If we get here, all policies are processed
+      console.log(`[FINDER MODE] All policies completed for job: ${jobId}`);
+      await supabase.from('policy_analysis_jobs').update({ 
+        status: 'completed', 
+        completed_at: new Date().toISOString(),
+        progress_message: 'All policies processed successfully!'
+      }).eq('id', jobId);
+      
+      return new Response(JSON.stringify({
+        success: true,
+        completed: true,
+        message: 'All policies have been processed!'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    return new Response(JSON.stringify({ success: true, message: `Successfully processed section: ${sectionTitle}` }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    // WORKER MODE: If policyId is provided, process that specific policy
+    if (jobId && policyId) {
+      console.log(`[WORKER MODE] Processing policy: ${policyId}`);
+      
+      // Get the policy content
+      const { data: policy, error: policyError } = await supabase
+        .from('etsy_policies')
+        .select('content, category')
+        .eq('id', policyId)
+        .single();
+      
+      if (policyError) throw policyError;
+
+      // Extract table of contents using simple text parsing
+      const lines = policy.content.split('\n');
+      const sectionTitles = lines
+        .filter(line => {
+          const trimmed = line.trim();
+          return trimmed.length > 0 && 
+                 trimmed.length < 100 && 
+                 (trimmed.match(/^[A-Z]/) || trimmed.match(/^\d+\./)) &&
+                 !trimmed.includes('©') &&
+                 !trimmed.includes('etsy.com');
+        })
+        .slice(0, 5); // Limit to first 5 sections
+
+      if (sectionTitles.length === 0) {
+        console.warn(`No sections found for policy: ${policy.category}`);
+        return new Response(JSON.stringify({
+          success: true,
+          message: `No processable sections found for ${policy.category}`
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Process each section
+      let processedSections = 0;
+      for (let i = 0; i < sectionTitles.length; i++) {
+        const sectionTitle = sectionTitles[i];
+        
+        // Find section content
+        const startIndex = lines.findIndex(line => line.includes(sectionTitle));
+        const endIndex = startIndex + 10; // Take next 10 lines as content
+        const sectionContent = lines.slice(startIndex, endIndex).join('\n').trim();
+        
+        // Generate content hash
+        const encoder = new TextEncoder();
+        const data = encoder.encode(sectionContent);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const contentHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+        // Update job progress
+        await supabase.from('policy_analysis_jobs').update({
+          progress_message: `Processing ${policy.category}: ${sectionTitle} (${i + 1}/${sectionTitles.length})`
+        }).eq('id', jobId);
+
+        // Call OpenAI to analyze the section
+        const aiResponse = await analyzeSection(sectionTitle, sectionContent, policy.category, openAIApiKey!);
+        const parsed = JSON.parse(repairJsonString(aiResponse));
+
+        // Insert the processed section into the database
+        const { error: insertError } = await supabase.from('policy_sections').insert({
+          policy_id: policyId,
+          section_title: parsed.section_title || sectionTitle,
+          section_content: parsed.section_content || sectionContent,
+          plain_english_summary: parsed.plain_english_summary || '',
+          category: parsed.category || 'general',
+          risk_level: parsed.risk_level || 'medium',
+          content_hash: contentHash,
+          order_index: i + 1
+        });
+
+        if (insertError && insertError.code !== '23505') {
+          throw insertError;
+        }
+        
+        processedSections++;
+      }
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: `Successfully processed ${processedSections} sections for ${policy.category}` 
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    throw new Error('Invalid request: must provide either jobId only (finder mode) or jobId + policyId (worker mode)');
 
   } catch (error) {
-    console.error('CRITICAL ERROR in section worker:', error.message);
-    const { jobId } = await req.json().catch(() => ({}));
+    console.error('CRITICAL ERROR:', error.message);
+    const body = await req.json().catch(() => ({}));
+    const { jobId } = body;
     if (jobId) {
-      await supabase.from('policy_analysis_jobs').update({ status: 'failed', error_message: error.message }).eq('id', jobId);
+      await supabase.from('policy_analysis_jobs').update({ 
+        status: 'failed', 
+        error_message: error.message 
+      }).eq('id', jobId);
     }
     return new Response(JSON.stringify({ error: error.message, success: false }), {
       status: 500,
