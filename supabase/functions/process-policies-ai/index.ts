@@ -99,8 +99,23 @@ serve(async (req) => {
         const sectionCount = sections ? sections.length : 0;
         console.log(`Policy ${policy.category} has ${sectionCount} sections`);
         
-        // If this policy has less than 3 sections, it needs processing
-        if (sectionCount < 3) {
+        // If this policy has less than 5 sections, it needs processing
+        // BUT we need to check if we just processed this same policy 
+        if (sectionCount < 5) {
+          // Check if this policy was recently processed in the last minute
+          const { data: recentSections } = await supabase
+            .from('policy_sections')
+            .select('created_at')
+            .eq('policy_id', policy.id)
+            .gte('created_at', new Date(Date.now() - 60000).toISOString()) // last minute
+            .limit(1);
+          
+          // If we just processed this policy, skip it and move to the next one
+          if (recentSections && recentSections.length > 0) {
+            console.log(`[FINDER MODE] Skipping recently processed policy: ${policy.category}`);
+            continue;
+          }
+          
           console.log(`[FINDER MODE] Found policy to process: ${policy.category}`);
           return new Response(JSON.stringify({
             success: true,
