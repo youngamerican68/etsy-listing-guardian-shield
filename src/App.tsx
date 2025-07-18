@@ -16,6 +16,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminPolicySections from "./pages/AdminPolicySections";
 import Analytics from "./pages/Analytics";
 import Policies from "./pages/Policies";
+import ListingAnalyzerPage from "./pages/ListingAnalyzerPage";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/policies" element={<Policies />} />
+            <Route path="/analyze" element={<ListingAnalyzerPage />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/rules" element={<AdminRules />} />
             <Route path="/admin/policy-sections" element={<AdminPolicySections />} />

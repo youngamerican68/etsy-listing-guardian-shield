@@ -11,6 +11,8 @@ import { Users, Shield, FileText, TrendingUp, BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CacheManagement from '@/components/dashboard/CacheManagement';
 import PolicyParserManager from '@/components/dashboard/PolicyParserManager';
+import ProcessingControls from '@/components/admin/ProcessingControls';
+import PolicyProcessingMonitor from '@/components/monitoring/PolicyProcessingMonitor';
 
 interface UserProfile {
   id: string;
@@ -205,6 +207,16 @@ const AdminDashboard = () => {
       {/* Policy Parser */}
       <div className="mb-8">
         <PolicyParserManager />
+      </div>
+
+      {/* Processing Controls */}
+      <div className="mb-8">
+        <ProcessingControls />
+      </div>
+
+      {/* Policy Processing Monitor */}
+      <div className="mb-8">
+        <PolicyProcessingMonitor />
       </div>
 
       {/* Cache Management */}

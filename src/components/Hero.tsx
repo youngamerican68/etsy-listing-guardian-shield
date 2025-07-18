@@ -1,5 +1,6 @@
 
 import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
 
 interface HeroProps {
   onGetStartedClick?: () => void;
@@ -29,14 +30,15 @@ const Hero = ({ onGetStartedClick }: HeroProps) => {
               >
                 Install Free Chrome Extension
               </Button>
-              <Button 
-                size="lg" 
-                variant="outline" 
-                className="border-trust-200 text-trust-700 hover:bg-trust-50 px-8 py-4 text-lg"
-                onClick={onGetStartedClick}
-              >
-                Try Web Dashboard
-              </Button>
+              <Link to="/analyze">
+                <Button 
+                  size="lg" 
+                  variant="outline" 
+                  className="border-trust-200 text-trust-700 hover:bg-trust-50 px-8 py-4 text-lg"
+                >
+                  Try Listing Analyzer
+                </Button>
+              </Link>
             </div>
 
             <div className="flex justify-center items-center space-x-8 text-sm text-gray-500">
