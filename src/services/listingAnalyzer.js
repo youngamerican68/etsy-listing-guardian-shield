@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { openRouterAnalyzer } from './openRouterAnalyzer.ts';
 
 const supabaseUrl = 'https://youjypiuqxlvyizlszmd.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlvdWp5cGl1cXhsdnlpemxzem1kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTExNjE2NjQsImV4cCI6MjA2NjczNzY2NH0.Z2pTJ_bPOEm8578lBx8qMzsA1pyNBpuuvb4jmibDPcA';
@@ -74,7 +75,85 @@ export async function analyzeListingContent(listingText) {
       }
     }
 
-    // 2. Check against policy sections (keyword/context matching)
+    // 2. Enhanced AI-powered analysis for comprehensive policy checking
+    console.log('🤖 Running AI-powered policy analysis...');
+    try {
+      // Extract title and description from listing text for AI analysis
+      const lines = listingText.split('\n');
+      const titleLine = lines.find(line => line.toLowerCase().startsWith('title:')) || lines[0] || '';
+      const descLine = lines.find(line => line.toLowerCase().startsWith('description:')) || lines.slice(1).join(' ') || '';
+      
+      const title = titleLine.replace(/^title:\s*/i, '').trim() || listingText.substring(0, 100);
+      const description = descLine.replace(/^description:\s*/i, '').trim() || listingText.substring(100);
+      
+      const aiResult = await openRouterAnalyzer.analyzeCompliance(title, description);
+      
+      // Add AI-flagged issues to our results
+      if (aiResult.status === 'fail' || aiResult.status === 'warning' || (aiResult.flaggedTerms && aiResult.flaggedTerms.length > 0)) {
+        
+        // If AI detected violations but flaggedTerms is empty, create a general violation
+        if (aiResult.status === 'fail' && (!aiResult.flaggedTerms || aiResult.flaggedTerms.length === 0)) {
+          const issue = {
+            type: 'ai_analysis',
+            term: 'AI Detected Violation',
+            category: 'ai_detected',
+            risk_level: 'high',
+            description: aiResult.reasoning || 'AI detected policy violation',
+            found_in: { context: listingText.substring(0, 100), fullContext: listingText },
+            policy_section: 'AI Analysis',
+            ai_reasoning: aiResult.reasoning,
+            model_used: aiResult.modelUsed
+          };
+          
+          flaggedIssues.push(issue);
+          riskAssessment.high++;
+        }
+        
+        // Process specific flagged terms if any
+        if (aiResult.flaggedTerms && aiResult.flaggedTerms.length > 0) {
+          aiResult.flaggedTerms.forEach(term => {
+            const issue = {
+              type: 'ai_analysis',
+              term: term,
+              category: 'ai_detected',
+              risk_level: aiResult.status === 'fail' ? 'high' : 'medium',
+              description: `AI detected potential policy violation: ${term}`,
+              found_in: findTermContext(listingText, term),
+              policy_section: 'AI Analysis',
+              ai_reasoning: aiResult.reasoning,
+              model_used: aiResult.modelUsed
+            };
+            
+            flaggedIssues.push(issue);
+            
+            // Update risk counters based on AI assessment
+            if (aiResult.status === 'fail') {
+              riskAssessment.high++;
+            } else if (aiResult.status === 'warning') {
+              riskAssessment.medium++;
+            }
+          });
+        }
+        
+        // Add AI suggestions to recommendations
+        if (aiResult.suggestions) {
+          aiResult.suggestions.forEach(suggestion => {
+            recommendations.push({
+              type: 'ai_suggestion',
+              reason: suggestion,
+              severity: aiResult.status === 'fail' ? 'high' : 'medium',
+              source: 'AI Analysis'
+            });
+          });
+        }
+      }
+      
+      console.log(`✅ AI analysis completed using ${aiResult.modelUsed}`);
+    } catch (aiError) {
+      console.warn('❌ AI analysis failed, continuing with database-only analysis:', aiError);
+    }
+
+    // 3. Check against policy sections (keyword/context matching)
     console.log('🔍 Checking policy sections...');
     for (const section of policySections) {
       const matchScore = calculatePolicyMatch(normalizedText, section);
@@ -103,7 +182,7 @@ export async function analyzeListingContent(listingText) {
       }
     }
 
-    // 3. Deduplicate flagged issues (keep higher risk level)
+    // 4. Deduplicate flagged issues (keep higher risk level)
     const deduplicatedIssues = [];
     const termTracker = new Map();
     
@@ -140,7 +219,7 @@ export async function analyzeListingContent(listingText) {
       riskAssessment[issue.risk_level]++;
     });
 
-    // 4. Determine overall risk level
+    // 5. Determine overall risk level
     if (riskAssessment.critical > 0) {
       riskAssessment.overall = 'critical';
     } else if (riskAssessment.high > 0) {
@@ -151,10 +230,10 @@ export async function analyzeListingContent(listingText) {
       riskAssessment.overall = 'warning';
     }
 
-    // 5. Generate summary recommendations
+    // 6. Generate summary recommendations
     const summaryRecommendations = generateSummaryRecommendations(flaggedIssues, riskAssessment);
 
-    // 6. Create analysis report
+    // 7. Create analysis report
     const analysisReport = {
       timestamp: new Date().toISOString(),
       listing_text: listingText,

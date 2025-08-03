@@ -1,12 +1,15 @@
 import React, { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Upload, Type, AlertTriangle, CheckCircle, XCircle, AlertCircle, FileText, Zap, Info } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { Upload, Type, AlertTriangle, CheckCircle, XCircle, AlertCircle, FileText, Zap, Info, Image, Tag, DollarSign, Package } from "lucide-react";
 import { analyzeListingContent } from '../services/listingAnalyzer';
 
 interface AnalysisResult {
@@ -42,11 +45,16 @@ interface AnalysisResult {
 }
 
 const ListingAnalyzer: React.FC = () => {
+  const [listingTitle, setListingTitle] = useState('');
+  const [listingDescription, setListingDescription] = useState('');
+  const [listingTags, setListingTags] = useState('');
+  const [listingCategory, setListingCategory] = useState('');
+  const [listingPrice, setListingPrice] = useState('');
   const [listingContent, setListingContent] = useState('');
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [inputMethod, setInputMethod] = useState<'type' | 'upload'>('type');
+  const [inputMethod, setInputMethod] = useState<'form' | 'upload'>('form');
 
   // Handle file drop
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -91,16 +99,35 @@ const ListingAnalyzer: React.FC = () => {
 
   // Analyze listing content
   const handleAnalyze = async () => {
-    if (!listingContent.trim()) {
-      setError('Please enter or upload your listing content');
-      return;
+    let contentToAnalyze = '';
+    
+    if (inputMethod === 'form') {
+      if (!listingTitle.trim() && !listingDescription.trim()) {
+        setError('Please fill in at least the title or description');
+        return;
+      }
+      
+      // Combine form fields into a single content string
+      contentToAnalyze = [
+        listingTitle && `Title: ${listingTitle}`,
+        listingDescription && `Description: ${listingDescription}`,
+        listingTags && `Tags: ${listingTags}`,
+        listingCategory && `Category: ${listingCategory}`,
+        listingPrice && `Price: ${listingPrice}`
+      ].filter(Boolean).join('\n\n');
+    } else {
+      if (!listingContent.trim()) {
+        setError('Please upload your listing content');
+        return;
+      }
+      contentToAnalyze = listingContent;
     }
 
     setIsAnalyzing(true);
     setError(null);
 
     try {
-      const result = await analyzeListingContent(listingContent);
+      const result = await analyzeListingContent(contentToAnalyze);
       setAnalysisResult(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed');
@@ -111,6 +138,11 @@ const ListingAnalyzer: React.FC = () => {
 
   // Clear analysis
   const handleClear = () => {
+    setListingTitle('');
+    setListingDescription('');
+    setListingTags('');
+    setListingCategory('');
+    setListingPrice('');
     setListingContent('');
     setAnalysisResult(null);
     setError(null);
@@ -151,48 +183,152 @@ const ListingAnalyzer: React.FC = () => {
   return (
     <TooltipProvider>
       <div className="max-w-4xl mx-auto p-6 space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+      <Card className="border-t-4 border-t-orange-500">
+        <CardHeader className="bg-gradient-to-r from-orange-50 to-orange-100">
+          <CardTitle className="flex items-center gap-2 text-orange-900">
             <FileText className="h-5 w-5" />
             Etsy Listing Guardian Shield
           </CardTitle>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-orange-700">
             Analyze your Etsy listing for policy compliance and risk assessment
           </p>
         </CardHeader>
-        <CardContent>
-          <Tabs value={inputMethod} onValueChange={(value) => setInputMethod(value as 'type' | 'upload')}>
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="type" className="flex items-center gap-2">
+        <CardContent className="pt-6">
+          <Tabs value={inputMethod} onValueChange={(value) => setInputMethod(value as 'form' | 'upload')}>
+            <TabsList className="grid w-full grid-cols-2 bg-orange-50">
+              <TabsTrigger value="form" className="flex items-center gap-2 data-[state=active]:bg-orange-500 data-[state=active]:text-white">
                 <Type className="h-4 w-4" />
-                Type Content
+                Create Listing
               </TabsTrigger>
-              <TabsTrigger value="upload" className="flex items-center gap-2">
+              <TabsTrigger value="upload" className="flex items-center gap-2 data-[state=active]:bg-orange-500 data-[state=active]:text-white">
                 <Upload className="h-4 w-4" />
                 Upload File
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="type" className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Enter your listing content:
-                </label>
-                <Textarea
-                  value={listingContent}
-                  onChange={(e) => setListingContent(e.target.value)}
-                  placeholder="Paste your listing title, description, tags, and any other content here..."
-                  className="min-h-[200px]"
-                />
+            <TabsContent value="form" className="space-y-6 mt-6">
+              {/* Photos Section */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Image className="h-5 w-5 text-orange-600" />
+                  <h3 className="text-lg font-semibold text-gray-900">Photos</h3>
+                </div>
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-400 transition-colors bg-gray-50">
+                  <Image className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                  <p className="text-sm text-gray-600 mb-2">
+                    Add up to 10 photos to showcase your item
+                  </p>
+                  <Button variant="outline" size="sm">
+                    Add Photos
+                  </Button>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* About This Listing Section */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900">About This Listing</h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="title" className="text-sm font-medium text-gray-700">
+                      Title <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="title"
+                      value={listingTitle}
+                      onChange={(e) => setListingTitle(e.target.value)}
+                      placeholder="Enter a descriptive title for your listing (up to 140 characters)"
+                      className="mt-1"
+                      maxLength={140}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      {listingTitle.length}/140 characters
+                    </p>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="description" className="text-sm font-medium text-gray-700">
+                      Description
+                    </Label>
+                    <Textarea
+                      id="description"
+                      value={listingDescription}
+                      onChange={(e) => setListingDescription(e.target.value)}
+                      placeholder="Describe your item in detail. Include materials, dimensions, care instructions, and any other important information buyers should know."
+                      className="mt-1 min-h-[120px]"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="tags" className="text-sm font-medium text-gray-700">
+                      Tags
+                    </Label>
+                    <Input
+                      id="tags"
+                      value={listingTags}
+                      onChange={(e) => setListingTags(e.target.value)}
+                      placeholder="Add relevant tags separated by commas (e.g., handmade, vintage, gift)"
+                      className="mt-1"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Help buyers find your item with relevant search terms
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Inventory & Pricing Section */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5 text-orange-600" />
+                  <h3 className="text-lg font-semibold text-gray-900">Inventory & Pricing</h3>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="price" className="text-sm font-medium text-gray-700">
+                      Price <span className="text-red-500">*</span>
+                    </Label>
+                    <div className="relative mt-1">
+                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                      <Input
+                        id="price"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={listingPrice}
+                        onChange={(e) => setListingPrice(e.target.value)}
+                        placeholder="0.00"
+                        className="pl-8"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="category" className="text-sm font-medium text-gray-700">
+                      Category
+                    </Label>
+                    <Input
+                      id="category"
+                      value={listingCategory}
+                      onChange={(e) => setListingCategory(e.target.value)}
+                      placeholder="Select or type category"
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
               </div>
             </TabsContent>
 
-            <TabsContent value="upload" className="space-y-4">
+            <TabsContent value="upload" className="space-y-4 mt-6">
               <div
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
-                className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors"
+                className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-400 transition-colors"
               >
                 <Upload className="h-12 w-12 mx-auto mb-4 text-gray-400" />
                 <p className="text-lg font-medium mb-2">
@@ -235,11 +371,11 @@ const ListingAnalyzer: React.FC = () => {
             </Alert>
           )}
 
-          <div className="flex gap-3 mt-6">
+          <div className="flex gap-3 mt-6 pt-4 border-t">
             <Button
               onClick={handleAnalyze}
-              disabled={isAnalyzing || !listingContent.trim()}
-              className="flex items-center gap-2"
+              disabled={isAnalyzing}
+              className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white"
             >
               {isAnalyzing ? (
                 <>
