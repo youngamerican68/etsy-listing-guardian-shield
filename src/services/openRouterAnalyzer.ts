@@ -14,8 +14,9 @@ export interface OpenRouterComplianceResult {
 const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
-// Free models we can use (in order of preference)
-const FREE_MODELS = [
+// Models we can use (Mixtral is paid but very cheap, others are free)
+const PREFERRED_MODELS = [
+  'mistralai/mixtral-8x7b-instruct', // Small cost but much better detection
   'mistralai/mistral-7b-instruct:free',
   'meta-llama/llama-3.1-8b-instruct:free', 
   'huggingface/zephyr-7b-beta:free',
@@ -25,13 +26,13 @@ const FREE_MODELS = [
 export class OpenRouterAnalyzer {
   private async getRelevantPolicies(): Promise<string> {
     try {
-      // Get key policy sections that relate to listing compliance
+      // Get ALL policy sections to use the complete expanded policy database
       const { data: policySections } = await supabase
         .from('policy_sections')
         .select('section_title, plain_english_summary, category, risk_level')
-        .in('category', ['intellectual_property', 'prohibited_items', 'handmade_reselling'])
+        .not('plain_english_summary', 'is', null)
         .order('risk_level', { ascending: false })
-        .limit(10);
+; // Use ALL 143 processed sections for maximum coverage
 
       if (!policySections || policySections.length === 0) {
         return `
@@ -101,39 +102,68 @@ export class OpenRouterAnalyzer {
     listingDescription: string,
     policies: string
   ): Promise<OpenRouterComplianceResult> {
-    const prompt = `You are an Etsy policy compliance expert. Analyze this listing for trademark violations.
+    const prompt = `You are an expert Etsy compliance analyzer. Analyze this listing for ALL policy violations with MAXIMUM sensitivity.
 
-CRITICAL RULE: Etsy PROHIBITS using ANY brand names, trademarks, or company names in listings.
+🚨 ETSY PROHIBITS (Flag ANY occurrence):
 
-EXAMPLES OF PROHIBITED BRANDS & CHARACTERS:
-- Food: Hershey, Heinz, Coca-Cola, Pepsi, McDonald's, KFC, Starbucks, Oreo, Kraft
-- Fashion: Nike, Adidas, Gucci, Louis Vuitton, Chanel, Prada
-- Tech: Apple, Samsung, Google, Microsoft, Sony
-- Entertainment: Disney, Marvel, Pokemon, Nintendo, Harry Potter
-- Star Wars: Chewbacca, Han Solo, Luke Skywalker, Darth Vader, Yoda, Jedi, Sith
-- Pokemon: Pikachu, Charizard, Bulbasaur, Squirtle, Mewtwo, Pokeball
-- Disney: Mickey Mouse, Elsa, Anna, Frozen, Moana, Simba, Buzz Lightyear, Woody
-- Marvel: Spider-Man, Iron Man, Captain America, Hulk, Thor, Deadpool, X-Men
+1. TRADEMARK/BRAND VIOLATIONS:
+   - Corporate brands: Nike, Apple, Disney, Coca-Cola, McDonald's, Starbucks
+   - Entertainment: Marvel, Pokemon, Star Wars, Harry Potter, Nintendo
+   - Fashion: Gucci, Louis Vuitton, Chanel, Coach, Prada
+   - Sports: NFL, NBA, MLB, FIFA, Olympics
+   - Food brands: Hershey, Oreo, Kraft, Heinz
+
+2. CELEBRITY/PUBLIC FIGURE VIOLATIONS:
+   - Actors: Brad Pitt, Tom Cruise, Jennifer Lawrence, Leonardo DiCaprio
+   - Musicians: Taylor Swift, Beyonce, Drake, Ariana Grande
+   - Politicians: Any president, prime minister, political figure
+   - Influencers: Kim Kardashian, Elon Musk, Oprah
+   - Historical figures: Einstein, Gandhi (if used commercially)
+
+3. CHARACTER/IP VIOLATIONS:
+   - Disney: Mickey Mouse, Elsa, Anna, Simba, Buzz Lightyear
+   - Marvel/DC: Spider-Man, Batman, Superman, Iron Man, Hulk
+   - Anime: Naruto, Goku, Pikachu, Hello Kitty
+   - Movies/TV: Harry Potter, Game of Thrones characters
+
+4. DANGEROUS PATTERN PHRASES:
+   - "look like [person]", "similar to [brand]", "[celebrity] style"
+   - "inspired by [brand/person]", "knockoff", "replica"
+   - "healing", "cure", "medical", "FDA approved" (health claims)
+   - "vintage [brand]" if using trademark
+
+5. PROHIBITED ITEMS:
+   - Weapons, drugs, recalled items
+   - Adult content, hazardous materials
+   - Counterfeit, dropshipping indicators
+
+ETSY POLICY DATABASE (from your comprehensive policy analysis):
+${policies}
 
 LISTING TO ANALYZE:
 Title: "${listingTitle}"
 Description: "${listingDescription}"
 
-TASK: Check if this listing contains ANY brand names or trademarks.
+TASK: 
+1. Check against ALL the policy sections above
+2. Use the comprehensive brand/celebrity examples provided
+3. Scrutinize EVERY WORD for violations
+4. Cross-reference with the plain English policy summaries
+5. Be EXTREMELY THOROUGH - flag even subtle references
 
 RESPOND WITH JSON ONLY:
 {
   "status": "fail",
-  "flaggedTerms": ["Hershey"],
+  "flaggedTerms": ["Brad Pitt"],
   "violations": [
     {
-      "term": "Hershey",
-      "reason": "Hershey is a registered trademark and cannot be used in Etsy listings",
+      "term": "Brad Pitt",
+      "reason": "Celebrity names cannot be used in listings due to right of publicity laws",
       "severity": "high"
     }
   ],
-  "suggestions": ["Remove 'Hershey' and use generic terms like 'milk chocolate' instead"],
-  "reasoning": "Found trademark violation: Hershey is a protected brand name"
+  "suggestions": ["Remove celebrity reference and use generic terms like 'handsome actor style' instead"],
+  "reasoning": "Found celebrity likeness violation: Using Brad Pitt's name violates right of publicity"
 }`;
 
     try {
@@ -201,8 +231,8 @@ RESPOND WITH JSON ONLY:
 
     const policies = await this.getRelevantPolicies();
     
-    // Try each free model until one works
-    for (const model of FREE_MODELS) {
+    // Try each preferred model until one works
+    for (const model of PREFERRED_MODELS) {
       try {
         console.log(`🤖 Trying model: ${model}`);
         const result = await this.analyzeWithModel(model, listingTitle, listingDescription, policies);

@@ -13,6 +13,8 @@ import CacheManagement from '@/components/dashboard/CacheManagement';
 import PolicyParserManager from '@/components/dashboard/PolicyParserManager';
 import ProcessingControls from '@/components/admin/ProcessingControls';
 import PolicyProcessingMonitor from '@/components/monitoring/PolicyProcessingMonitor';
+import PolicyExpansionManager from '@/components/admin/PolicyExpansionManager';
+import OfflinePolicyDemo from '@/components/admin/OfflinePolicyDemo';
 
 interface UserProfile {
   id: string;
@@ -212,6 +214,11 @@ const AdminDashboard = () => {
       {/* Processing Controls */}
       <div className="mb-8">
         <ProcessingControls />
+      </div>
+
+      {/* Policy Expansion Manager */}
+      <div className="mb-8">
+        <PolicyExpansionManager />
       </div>
 
       {/* Policy Processing Monitor */}

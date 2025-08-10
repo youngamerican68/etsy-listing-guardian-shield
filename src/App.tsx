@@ -17,6 +17,7 @@ import AdminPolicySections from "./pages/AdminPolicySections";
 import Analytics from "./pages/Analytics";
 import Policies from "./pages/Policies";
 import ListingAnalyzerPage from "./pages/ListingAnalyzerPage";
+import Debug from "./pages/Debug";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +39,7 @@ const App = () => (
             <Route path="/admin/analytics" element={<Analytics />} />
             <Route path="/test" element={<AuthTest />} />
             <Route path="/test-compliance" element={<TestCompliance />} />
+            <Route path="/debug" element={<Debug />} />
             <Route path="/proof/:token" element={<ProofPage />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
