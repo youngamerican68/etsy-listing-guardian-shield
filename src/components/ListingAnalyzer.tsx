@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,14 +9,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
-import { Upload, Type, AlertTriangle, CheckCircle, XCircle, AlertCircle, FileText, Zap, Info, Image, Tag, DollarSign, Package } from "lucide-react";
+import { Upload, Type, AlertTriangle, CheckCircle, XCircle, AlertCircle, FileText, Zap, Info, Image, Tag, DollarSign, Package, Edit3, Sidebar } from "lucide-react";
 import { analyzeListingContent } from '../services/listingAnalyzer';
+import { openRouterAnalyzer } from '../services/openRouterAnalyzer';
+
+// Import new enhanced components
+import ComplianceMeter from './ui/ComplianceMeter';
+import SuggestedFix from './ui/SuggestedFix';
+import SuccessIndicators from './ui/SuccessIndicators';
+import InlineEditor from './ui/InlineEditor';
+import FixPrioritySidebar from './ui/FixPrioritySidebar';
 
 interface AnalysisResult {
   timestamp: string;
   listing_text: string;
   analysis_results: {
     total_issues: number;
+    compliance_score: number;
     risk_assessment: {
       overall: string;
       critical: number;
@@ -33,13 +42,34 @@ interface AnalysisResult {
       found_in?: {
         context: string;
         position: number;
+        displayContext?: {
+          before: string;
+          term: string;
+          after: string;
+        };
       };
+      // Enhanced grouping data
+      occurrences?: any[];
+      occurrenceCount?: number;
+      groupId?: string;
+      isGrouped?: boolean;
     }>;
     summary_recommendations: Array<{
       priority: string;
       message: string;
       action: string;
     }>;
+    section_health?: Array<{
+      name: string;
+      status: 'pass' | 'warning' | 'fail';
+      issueCount: number;
+    }>;
+    ui_data?: {
+      has_grouped_issues: boolean;
+      total_occurrences: number;
+      clean_sections: any[];
+      problem_sections: any[];
+    };
   };
   compliance_status: string;
 }
@@ -55,6 +85,140 @@ const ListingAnalyzer: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inputMethod, setInputMethod] = useState<'form' | 'upload'>('form');
+  
+  // Enhanced UI state
+  const [showInlineEditor, setShowInlineEditor] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [fixSuggestions, setFixSuggestions] = useState<Map<string, any>>(new Map());
+  const [completedFixes, setCompletedFixes] = useState<Set<string>>(new Set());
+  const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState<Set<string>>(new Set());
+
+  // Clear suggestions when starting new analysis to prevent mix-ups
+  useEffect(() => {
+    if (isAnalyzing) {
+      console.log('🧹 Clearing previous suggestions due to new analysis');
+      setFixSuggestions(new Map());
+      setIsGeneratingSuggestions(new Set());
+      setCompletedFixes(new Set());
+    }
+  }, [isAnalyzing]);
+
+  // Enhanced handler functions
+  const handleApplyFix = useCallback(async (originalTerm: string, replacement: string) => {
+    // Apply fix to form fields
+    if (listingTitle.toLowerCase().includes(originalTerm.toLowerCase())) {
+      setListingTitle(prev => prev.replace(new RegExp(originalTerm, 'gi'), replacement));
+    }
+    if (listingDescription.toLowerCase().includes(originalTerm.toLowerCase())) {
+      setListingDescription(prev => prev.replace(new RegExp(originalTerm, 'gi'), replacement));
+    }
+    if (listingTags.toLowerCase().includes(originalTerm.toLowerCase())) {
+      setListingTags(prev => prev.replace(new RegExp(originalTerm, 'gi'), replacement));
+    }
+    
+    // Mark as completed
+    setCompletedFixes(prev => new Set([...prev, originalTerm]));
+    
+    // Re-analyze after a short delay
+    setTimeout(() => {
+      handleAnalyze();
+    }, 1000);
+  }, [listingTitle, listingDescription, listingTags]);
+
+  const handleMarkFalsePositive = useCallback((term: string, reason: string) => {
+    console.log(`Marked "${term}" as false positive: ${reason}`);
+    setCompletedFixes(prev => new Set([...prev, term]));
+  }, []);
+
+  const handleLearnMore = useCallback((policySection: string) => {
+    // Open policy section in new tab
+    window.open(`https://help.etsy.com/hc/en-us/search?query=${encodeURIComponent(policySection)}`, '_blank');
+  }, []);
+
+  const handleGenerateFixSuggestion = useCallback(async (issue: any) => {
+    const issueKey = issue.term.toLowerCase().trim();
+    const analysisTimestamp = analysisResult?.timestamp || '';
+    const uniqueKey = `${issueKey}_${analysisTimestamp}`;
+    
+    // Enhanced deduplication check with more detailed logging
+    if (fixSuggestions.has(issueKey)) {
+      console.log(`🔄 Fix suggestion already exists for: "${issueKey}"`);
+      return;
+    }
+    
+    if (isGeneratingSuggestions.has(issueKey)) {
+      console.log(`⏳ Fix suggestion already generating for: "${issueKey}"`);
+      return;
+    }
+
+    console.log(`🚀 Generating fix suggestion for: "${issueKey}" (analysis: ${analysisTimestamp})`);
+    setIsGeneratingSuggestions(prev => new Set([...prev, issueKey]));
+
+    try {
+      const suggestion = await openRouterAnalyzer.generateFixSuggestions(
+        issue.term,
+        issue.found_in?.context || '',
+        issue.category
+      );
+      
+      // Add metadata to track which analysis this suggestion belongs to
+      const enhancedSuggestion = {
+        ...suggestion,
+        generatedAt: new Date().toISOString(),
+        forAnalysis: analysisTimestamp,
+        originalTerm: issue.term
+      };
+      
+      console.log(`✅ Generated suggestion for: "${issueKey}"`, enhancedSuggestion);
+      setFixSuggestions(prev => new Map([...prev, [issueKey, enhancedSuggestion]]));
+    } catch (error) {
+      console.error(`❌ Failed to generate fix suggestion for "${issueKey}":`, error);
+    } finally {
+      setIsGeneratingSuggestions(prev => {
+        const newSet = new Set([...prev]);
+        newSet.delete(issueKey);
+        console.log(`✨ Completed suggestion generation for: "${issueKey}"`);
+        return newSet;
+      });
+    }
+  }, [fixSuggestions, isGeneratingSuggestions, analysisResult?.timestamp]);
+
+  const handleInlineEditorSave = useCallback((content: any) => {
+    setListingTitle(content.title);
+    setListingDescription(content.description);
+    setListingTags(content.tags);
+    setListingCategory(content.category);
+    setListingPrice(content.price);
+    setShowInlineEditor(false);
+  }, []);
+
+  const handleExportFixList = useCallback(() => {
+    if (!analysisResult) return;
+    
+    const fixList = analysisResult.analysis_results.flagged_issues.map((issue, index) => ({
+      priority: index + 1,
+      term: issue.term,
+      category: issue.category,
+      risk: issue.risk_level,
+      description: issue.description,
+      completed: completedFixes.has(issue.term) ? 'Yes' : 'No'
+    }));
+
+    const csvContent = [
+      'Priority,Term,Category,Risk Level,Description,Completed',
+      ...fixList.map(item => 
+        `${item.priority},"${item.term}","${item.category}","${item.risk}","${item.description}","${item.completed}"`
+      )
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'etsy-fix-list.csv';
+    a.click();
+    window.URL.revokeObjectURL(url);
+  }, [analysisResult, completedFixes]);
 
   // Handle file drop
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -218,6 +382,14 @@ const ListingAnalyzer: React.FC = () => {
                   <p className="text-sm text-gray-600 mb-2">
                     Add up to 10 photos to showcase your item
                   </p>
+                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-xs text-blue-700 font-medium mb-1">
+                      💡 Photo Analysis Coming Soon
+                    </p>
+                    <p className="text-xs text-blue-600">
+                      Currently analyzing text only. Image analysis for trademark logos, copyrighted characters, and policy violations will be added in a future update.
+                    </p>
+                  </div>
                   <Button variant="outline" size="sm">
                     Add Photos
                   </Button>
@@ -396,145 +568,179 @@ const ListingAnalyzer: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Analysis Results */}
+      {/* Enhanced Analysis Results */}
       {analysisResult && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${
-                analysisResult.compliance_status === 'compliant' 
-                  ? 'bg-green-100 text-green-800' 
-                  : 'bg-red-100 text-red-800'
-              }`}>
-                {analysisResult.compliance_status === 'compliant' ? (
-                  <CheckCircle className="h-4 w-4" />
-                ) : (
-                  <XCircle className="h-4 w-4" />
-                )}
-                {analysisResult.compliance_status === 'compliant' ? 'Compliant' : 'Needs Review'}
-              </div>
-              <span className="ml-2">Analysis Results</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Risk Assessment Summary */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div className="text-center">
-                <div className={`text-2xl font-bold ${getRiskStyling(analysisResult.analysis_results.risk_assessment.overall)} rounded-lg p-3`}>
-                  {analysisResult.analysis_results.risk_assessment.overall.toUpperCase()}
-                </div>
-                <p className="text-sm text-gray-600 mt-1">Overall Risk</p>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-red-600">{analysisResult.analysis_results.risk_assessment.critical}</div>
-                <p className="text-sm text-gray-600">Critical</p>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-red-500">{analysisResult.analysis_results.risk_assessment.high}</div>
-                <p className="text-sm text-gray-600">High</p>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-yellow-500">{analysisResult.analysis_results.risk_assessment.medium}</div>
-                <p className="text-sm text-gray-600">Medium</p>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-500">{analysisResult.analysis_results.risk_assessment.low}</div>
-                <p className="text-sm text-gray-600">Low</p>
-              </div>
+        <div className={`space-y-6 ${showSidebar ? 'lg:grid lg:grid-cols-4 lg:gap-6' : ''}`}>
+          <div className={`space-y-6 ${showSidebar ? 'lg:col-span-3' : ''}`}>
+            
+            {/* Compliance Meter */}
+            <ComplianceMeter
+              overallStatus={analysisResult.analysis_results.total_issues === 0 ? 'pass' : 'fail'}
+              sectionBreakdown={analysisResult.analysis_results.section_health || []}
+              totalIssues={analysisResult.analysis_results.total_issues}
+              riskAssessment={analysisResult.analysis_results.risk_assessment}
+            />
+
+            {/* Success Indicators */}
+            {analysisResult.analysis_results.ui_data?.clean_sections && 
+             analysisResult.analysis_results.ui_data.clean_sections.length > 0 && (
+              <SuccessIndicators
+                cleanSections={analysisResult.analysis_results.ui_data.clean_sections}
+                complianceScore={analysisResult.analysis_results.total_issues === 0 ? 100 : 0}
+                totalIssuesFixed={completedFixes.size}
+                showCelebration={analysisResult.analysis_results.total_issues === 0}
+              />
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap gap-3">
+              {analysisResult.analysis_results.flagged_issues.length > 0 && (
+                <>
+                  <Button
+                    onClick={() => setShowInlineEditor(!showInlineEditor)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    <Edit3 className="h-4 w-4 mr-2" />
+                    {showInlineEditor ? 'Hide Editor' : 'Fix Issues Now'}
+                  </Button>
+                  
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowSidebar(!showSidebar)}
+                  >
+                    <Sidebar className="h-4 w-4 mr-2" />
+                    {showSidebar ? 'Hide' : 'Show'} Priority List
+                  </Button>
+                </>
+              )}
             </div>
 
-            {/* Flagged Issues */}
+            {/* Inline Editor */}
+            {showInlineEditor && (
+              <InlineEditor
+                originalContent={{
+                  title: listingTitle,
+                  description: listingDescription,
+                  tags: listingTags,
+                  category: listingCategory,
+                  price: listingPrice
+                }}
+                onContentChange={() => {}} // Real-time changes handled in component
+                onReanalyze={async (content) => {
+                  setIsAnalyzing(true);
+                  try {
+                    const result = await analyzeListingContent(content);
+                    setAnalysisResult(result);
+                  } finally {
+                    setIsAnalyzing(false);
+                  }
+                }}
+                onSave={handleInlineEditorSave}
+                onCancel={() => setShowInlineEditor(false)}
+                isAnalyzing={isAnalyzing}
+              />
+            )}
+
+            {/* Enhanced Flagged Issues */}
             {analysisResult.analysis_results.flagged_issues.length > 0 && (
-              <div>
-                <h3 className="text-lg font-semibold mb-3">Flagged Issues ({analysisResult.analysis_results.flagged_issues.length})</h3>
-                <div className="space-y-3">
-                  {analysisResult.analysis_results.flagged_issues.map((issue, index) => (
-                    <div key={index} className="border rounded-lg p-4 bg-gray-50">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Badge className={getRiskStyling(issue.risk_level)}>
-                              {getRiskIcon(issue.risk_level)}
-                              {issue.risk_level.toUpperCase()}
-                            </Badge>
-                            <Badge variant="outline">{issue.category}</Badge>
-                          </div>
-                          <p className="font-medium text-red-600 mb-1">
-                            Flagged term: "{issue.term}"
-                          </p>
-                          {issue.description && (
-                            <p className="text-sm text-gray-700 mb-2">
-                              {issue.description}
-                            </p>
-                          )}
-                          {issue.found_in && (
-                            <div className="bg-white p-3 rounded border text-sm border-l-4 border-l-orange-200">
-                              <div className="space-y-2">
-                                <div className="flex items-center gap-2">
-                                  <strong className="text-gray-700">Found in context:</strong>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <div className="flex items-center gap-1 cursor-help text-blue-600 hover:text-blue-800">
-                                        <Info className="h-4 w-4" />
-                                        <span className="text-xs">Hover for full sentence</span>
-                                      </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="max-w-lg p-3">
-                                      <div className="space-y-2">
-                                        <p className="font-medium text-gray-900">Complete sentence:</p>
-                                        <p className="text-sm text-gray-700 leading-relaxed">
-                                          "{issue.found_in.fullContext || issue.found_in.context}"
-                                        </p>
-                                        <p className="text-xs text-gray-500 italic">
-                                          The flagged term "{issue.term}" appears in this context
-                                        </p>
-                                      </div>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </div>
-                                <div className="bg-gray-50 p-2 rounded font-mono text-xs">
-                                  "...{issue.found_in.context}..."
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <span>Issues to Fix ({analysisResult.analysis_results.flagged_issues.length})</span>
+                    {analysisResult.analysis_results.ui_data?.has_grouped_issues && (
+                      <Badge variant="outline" className="text-xs">
+                        {analysisResult.analysis_results.ui_data.total_occurrences} total occurrences
+                      </Badge>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {analysisResult.analysis_results.flagged_issues.map((issue, index) => {
+                    const issueKey = issue.term.toLowerCase().trim();
+                    
+                    return (
+                      <SuggestedFix
+                        key={`${issueKey}-${index}`}
+                        issue={issue}
+                        suggestedFix={fixSuggestions.get(issueKey)}
+                        onApplyFix={handleApplyFix}
+                        onMarkFalsePositive={handleMarkFalsePositive}
+                        onLearnMore={handleLearnMore}
+                        isLoading={isGeneratingSuggestions.has(issueKey)}
+                        onRequestSuggestion={() => handleGenerateFixSuggestion(issue)}
+                      />
+                    );
+                  })}
+                </CardContent>
+              </Card>
             )}
 
             {/* Recommendations */}
-            <div>
-              <h3 className="text-lg font-semibold mb-3">Recommendations</h3>
-              <div className="space-y-3">
-                {analysisResult.analysis_results.summary_recommendations.map((rec, index) => (
-                  <Alert key={index} variant={rec.priority === 'success' ? 'default' : 'destructive'}>
-                    <div className="flex items-start gap-2">
-                      {rec.priority === 'success' ? (
-                        <CheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
-                      ) : (
-                        <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5" />
-                      )}
-                      <div>
-                        <p className="font-medium">{rec.message}</p>
-                        <p className="text-sm mt-1 opacity-80">{rec.action}</p>
+            <Card>
+              <CardHeader>
+                <CardTitle>Recommendations</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {analysisResult.analysis_results.summary_recommendations.map((rec, index) => (
+                    <Alert key={index} variant={rec.priority === 'success' ? 'default' : 'destructive'}>
+                      <div className="flex items-start gap-2">
+                        {rec.priority === 'success' ? (
+                          <CheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
+                        ) : (
+                          <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5" />
+                        )}
+                        <div>
+                          <p className="font-medium">{rec.message}</p>
+                          <p className="text-sm mt-1 opacity-80">{rec.action}</p>
+                        </div>
                       </div>
-                    </div>
-                  </Alert>
-                ))}
-              </div>
-            </div>
+                    </Alert>
+                  ))}
+                </div>
+                
+                {/* Analysis Metadata */}
+                <div className="text-xs text-gray-500 border-t pt-4 mt-4">
+                  <p>Analysis completed at: {new Date(analysisResult.timestamp).toLocaleString()}</p>
+                  <p>Status: {analysisResult.analysis_results.total_issues === 0 ? 'COMPLIANT' : 'NEEDS FIXES'}</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-            {/* Analysis Metadata */}
-            <div className="text-xs text-gray-500 border-t pt-4">
-              <p>Analysis completed at: {new Date(analysisResult.timestamp).toLocaleString()}</p>
-              <p>Total issues found: {analysisResult.analysis_results.total_issues}</p>
+          {/* Priority Sidebar */}
+          {showSidebar && (
+            <div className="lg:col-span-1">
+              <FixPrioritySidebar
+                issues={analysisResult.analysis_results.flagged_issues.map((issue, index) => {
+                  const issueKey = issue.term.toLowerCase().trim();
+                  return {
+                    id: issue.term,
+                    term: issue.term,
+                    category: issue.category,
+                    risk_level: issue.risk_level,
+                    estimatedFixTime: fixSuggestions.get(issueKey)?.estimatedFixTime || '2 min',
+                    priority: index + 1,
+                    isCompleted: completedFixes.has(issue.term)
+                  };
+                })}
+                onIssueComplete={(issueId, completed) => {
+                  if (completed) {
+                    setCompletedFixes(prev => new Set([...prev, issueId]));
+                  } else {
+                    setCompletedFixes(prev => {
+                      const newSet = new Set([...prev]);
+                      newSet.delete(issueId);
+                      return newSet;
+                    });
+                  }
+                }}
+                onExportFixList={handleExportFixList}
+                className="sticky top-6"
+              />
             </div>
-          </CardContent>
-        </Card>
+          )}
+        </div>
       )}
       </div>
     </TooltipProvider>

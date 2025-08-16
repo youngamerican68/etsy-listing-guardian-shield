@@ -29,9 +29,27 @@ export async function analyzeListingContent(listingText) {
     const policySections = policySectionsResult.data || [];
 
     console.log(`📊 Loaded ${complianceRules.length} compliance rules and ${policySections.length} policy sections`);
+    console.log('🔍 Analyzing text:', listingText);
+    
+    // Add hardcoded fallback rules for critical violations
+    const fallbackRules = [
+      { term: 'yoda', risk_level: 'high', reason: 'Star Wars character - Disney copyright violation' },
+      { term: 'boba fett', risk_level: 'high', reason: 'Star Wars character - Disney copyright violation' },
+      { term: 'brad pitt', risk_level: 'high', reason: 'Celebrity name - right of publicity violation' },
+      { term: 'gi joe', risk_level: 'high', reason: 'Hasbro trademark violation' },
+      { term: 'pokemon', risk_level: 'high', reason: 'Nintendo trademark violation' },
+      { term: 'disney', risk_level: 'high', reason: 'Disney trademark violation' },
+      { term: 'marvel', risk_level: 'high', reason: 'Marvel trademark violation' },
+      { term: 'star wars', risk_level: 'high', reason: 'Star Wars trademark violation' }
+    ];
+    
+    // Merge database rules with fallback rules
+    const allRules = [...complianceRules, ...fallbackRules];
+    console.log(`📊 Total rules (including fallbacks): ${allRules.length}`);
 
     // Normalize listing text for analysis
     const normalizedText = listingText.toLowerCase().trim();
+    console.log('🔍 Normalized text:', normalizedText);
     
     // Results containers
     const flaggedIssues = [];
@@ -48,12 +66,14 @@ export async function analyzeListingContent(listingText) {
 
     // 1. Check against compliance rules (exact term matching)
     console.log('🔍 Checking compliance rules...');
-    for (const rule of complianceRules) {
+    for (const rule of allRules) {
       if (rule.term && normalizedText.includes(rule.term.toLowerCase())) {
+        console.log(`🚨 VIOLATION FOUND: "${rule.term}" in "${normalizedText}"`);
+        console.log(`🚨 Rule details:`, rule);
         const issue = {
           type: 'compliance_rule',
           term: rule.term,
-          category: rule.category,
+          category: rule.category || 'copyright',
           risk_level: rule.risk_level,
           description: rule.reason,
           found_in: findTermContext(listingText, rule.term),
@@ -182,33 +202,12 @@ export async function analyzeListingContent(listingText) {
       }
     }
 
-    // 4. Deduplicate flagged issues (keep higher risk level)
-    const deduplicatedIssues = [];
-    const termTracker = new Map();
+    // 4. Group issues by identical terms and create occurrence tracking
+    const groupedIssues = groupIssuesByTerm(flaggedIssues);
     
-    for (const issue of flaggedIssues) {
-      const term = issue.term.toLowerCase();
-      const existing = termTracker.get(term);
-      
-      if (!existing) {
-        termTracker.set(term, issue);
-        deduplicatedIssues.push(issue);
-      } else {
-        // Keep the issue with higher risk level or better description
-        const riskPriority = { critical: 4, high: 3, medium: 2, low: 1, warning: 0 };
-        if (riskPriority[issue.risk_level] > riskPriority[existing.risk_level] || 
-            (issue.risk_level === existing.risk_level && issue.description && !existing.description)) {
-          // Replace with higher priority issue
-          const index = deduplicatedIssues.indexOf(existing);
-          deduplicatedIssues[index] = issue;
-          termTracker.set(term, issue);
-        }
-      }
-    }
-    
-    // Update flaggedIssues with deduplicated list
+    // Update flaggedIssues with grouped issues
     flaggedIssues.length = 0;
-    flaggedIssues.push(...deduplicatedIssues);
+    flaggedIssues.push(...groupedIssues);
     
     // Recalculate risk assessment
     Object.keys(riskAssessment).forEach(key => {
@@ -230,25 +229,40 @@ export async function analyzeListingContent(listingText) {
       riskAssessment.overall = 'warning';
     }
 
-    // 6. Generate summary recommendations
+    // 6. Calculate compliance score and analyze section health
+    const complianceScore = calculateComplianceScore(riskAssessment, flaggedIssues.length);
+    const sectionHealth = analyzeSectionHealth(listingText, flaggedIssues);
+
+    // 7. Generate summary recommendations
     const summaryRecommendations = generateSummaryRecommendations(flaggedIssues, riskAssessment);
 
-    // 7. Create analysis report
+    // 8. Create enhanced analysis report
     const analysisReport = {
       timestamp: new Date().toISOString(),
       listing_text: listingText,
       analysis_results: {
         total_issues: flaggedIssues.length,
+        compliance_score: complianceScore,
         risk_assessment: riskAssessment,
         flagged_issues: flaggedIssues,
         matched_policy_sections: matchedPolicySections,
         recommendations: recommendations,
-        summary_recommendations: summaryRecommendations
+        summary_recommendations: summaryRecommendations,
+        section_health: sectionHealth,
+        // Enhanced data for UI components
+        ui_data: {
+          has_grouped_issues: flaggedIssues.some(issue => issue.isGrouped),
+          total_occurrences: flaggedIssues.reduce((sum, issue) => sum + (issue.occurrenceCount || 1), 0),
+          clean_sections: sectionHealth.filter(section => section.status === 'pass'),
+          problem_sections: sectionHealth.filter(section => section.status !== 'pass')
+        }
       },
-      compliance_status: riskAssessment.overall === 'low' ? 'compliant' : 'needs_review'
+      compliance_status: flaggedIssues.length === 0 ? 'compliant' : 'needs_review'
     };
 
     console.log(`✅ Analysis complete: ${flaggedIssues.length} issues found, overall risk: ${riskAssessment.overall}`);
+    console.log(`🔍 Final flagged issues:`, flaggedIssues);
+    console.log(`🔍 Final analysis report:`, analysisReport);
     return analysisReport;
 
   } catch (error) {
@@ -258,23 +272,63 @@ export async function analyzeListingContent(listingText) {
 }
 
 /**
- * Finds the context around a flagged term in the original text
+ * Finds the context around a flagged term in the original text with word boundaries
  */
-function findTermContext(text, term, contextLength = 50) {
-  const index = text.toLowerCase().indexOf(term.toLowerCase());
+function findTermContext(text, term, contextWords = 10) {
+  const lowerText = text.toLowerCase();
+  const lowerTerm = term.toLowerCase();
+  const index = lowerText.indexOf(lowerTerm);
+  
   if (index === -1) return null;
   
-  // Get short context (current behavior)
-  const start = Math.max(0, index - contextLength);
-  const end = Math.min(text.length, index + term.length + contextLength);
-  const shortContext = text.substring(start, end);
+  // Split text into words while preserving original case
+  const words = text.match(/\S+/g) || [];
+  const lowerWords = words.map(w => w.toLowerCase());
+  
+  // Find the word that contains our term
+  let termWordIndex = -1;
+  for (let i = 0; i < lowerWords.length; i++) {
+    if (lowerWords[i].includes(lowerTerm)) {
+      termWordIndex = i;
+      break;
+    }
+  }
+  
+  if (termWordIndex === -1) {
+    // Fallback to character-based context
+    const start = Math.max(0, index - 50);
+    const end = Math.min(text.length, index + term.length + 50);
+    const shortContext = text.substring(start, end);
+    
+    return {
+      context: shortContext,
+      fullContext: shortContext,
+      position: index,
+      beforeContext: text.substring(start, index),
+      termText: text.substring(index, index + term.length),
+      afterContext: text.substring(index + term.length, end),
+      wordBoundary: false
+    };
+  }
+  
+  // Get contextWords before and after the flagged term
+  const startWordIndex = Math.max(0, termWordIndex - contextWords);
+  const endWordIndex = Math.min(words.length, termWordIndex + contextWords + 1);
+  
+  const beforeWords = words.slice(startWordIndex, termWordIndex);
+  const flaggedWord = words[termWordIndex];
+  const afterWords = words.slice(termWordIndex + 1, endWordIndex);
+  
+  const beforeContext = beforeWords.join(' ');
+  const afterContext = afterWords.join(' ');
+  const contextSnippet = [...beforeWords, flaggedWord, ...afterWords].join(' ');
   
   // Get full sentence context
   const sentences = text.split(/[.!?]+/);
   let fullSentence = '';
   
   for (const sentence of sentences) {
-    if (sentence.toLowerCase().includes(term.toLowerCase())) {
+    if (sentence.toLowerCase().includes(lowerTerm)) {
       fullSentence = sentence.trim();
       break;
     }
@@ -284,7 +338,7 @@ function findTermContext(text, term, contextLength = 50) {
   if (!fullSentence) {
     const paragraphs = text.split(/\n\s*\n/);
     for (const paragraph of paragraphs) {
-      if (paragraph.toLowerCase().includes(term.toLowerCase())) {
+      if (paragraph.toLowerCase().includes(lowerTerm)) {
         fullSentence = paragraph.trim();
         break;
       }
@@ -292,9 +346,23 @@ function findTermContext(text, term, contextLength = 50) {
   }
   
   return {
-    context: shortContext,
-    fullContext: fullSentence || shortContext,
-    position: index
+    context: contextSnippet,
+    fullContext: fullSentence || contextSnippet,
+    position: index,
+    beforeContext,
+    termText: flaggedWord,
+    afterContext,
+    wordBoundary: true,
+    // Enhanced context for UI display
+    displayContext: {
+      before: beforeContext,
+      term: flaggedWord,
+      after: afterContext,
+      wordCount: {
+        before: beforeWords.length,
+        after: afterWords.length
+      }
+    }
   };
 }
 
@@ -343,6 +411,144 @@ function extractRelevantKeywords(sectionTitle) {
     .filter(word => word.length > 3)
     .slice(0, 3)
     .join(', ');
+}
+
+/**
+ * Groups issues by identical terms and tracks occurrences
+ */
+function groupIssuesByTerm(issues) {
+  const termGroups = new Map();
+  const groupedIssues = [];
+  
+  // Group issues by normalized term
+  for (const issue of issues) {
+    const normalizedTerm = issue.term.toLowerCase().trim();
+    
+    if (!termGroups.has(normalizedTerm)) {
+      // Create new group
+      const group = {
+        ...issue,
+        occurrences: [issue],
+        occurrenceCount: 1,
+        groupId: `group_${normalizedTerm.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        isGrouped: false
+      };
+      termGroups.set(normalizedTerm, group);
+      groupedIssues.push(group);
+    } else {
+      // Add to existing group
+      const existingGroup = termGroups.get(normalizedTerm);
+      existingGroup.occurrences.push(issue);
+      existingGroup.occurrenceCount++;
+      existingGroup.isGrouped = true;
+      
+      // Keep the highest risk level
+      const riskPriority = { critical: 4, high: 3, medium: 2, low: 1, warning: 0 };
+      if (riskPriority[issue.risk_level] > riskPriority[existingGroup.risk_level]) {
+        existingGroup.risk_level = issue.risk_level;
+        existingGroup.description = issue.description || existingGroup.description;
+      }
+      
+      // Merge found_in contexts if different
+      if (issue.found_in && existingGroup.found_in) {
+        if (!existingGroup.found_in.multipleContexts) {
+          existingGroup.found_in.multipleContexts = [existingGroup.found_in];
+        }
+        existingGroup.found_in.multipleContexts.push(issue.found_in);
+      }
+    }
+  }
+  
+  return groupedIssues;
+}
+
+/**
+ * Calculates a compliance score from 0-100 based on risk assessment
+ */
+function calculateComplianceScore(riskAssessment, totalIssues) {
+  let score = 100;
+  
+  // More aggressive scoring for violations
+  score -= riskAssessment.critical * 40;  // Critical issues: -40 points each (was 25)
+  score -= riskAssessment.high * 30;      // High issues: -30 points each (was 15)
+  score -= riskAssessment.medium * 15;    // Medium issues: -15 points each (was 8)
+  score -= riskAssessment.low * 5;        // Low issues: -5 points each (was 3)
+  score -= riskAssessment.warning * 2;    // Warning issues: -2 points each (was 1)
+  
+  // Celebrity and trademark violations get extra penalty
+  if (riskAssessment.high > 0 || riskAssessment.critical > 0) {
+    score -= 20; // Additional -20 for any high-risk violations
+  }
+  
+  // Ensure score doesn't go below 0
+  return Math.max(0, Math.min(100, score));
+}
+
+/**
+ * Analyzes which sections of the listing have no violations for positive reinforcement
+ */
+function analyzeSectionHealth(listingText, flaggedIssues) {
+  const sections = [
+    { name: 'Title', content: '' },
+    { name: 'Description', content: '' },
+    { name: 'Tags', content: '' },
+    { name: 'Category', content: '' },
+    { name: 'Price', content: '' }
+  ];
+  
+  // Extract content for each section
+  const lines = listingText.split('\n');
+  for (const line of lines) {
+    const lowerLine = line.toLowerCase();
+    if (lowerLine.startsWith('title:')) {
+      sections[0].content = line.substring(6).trim();
+    } else if (lowerLine.startsWith('description:')) {
+      sections[1].content = line.substring(12).trim();
+    } else if (lowerLine.startsWith('tags:')) {
+      sections[2].content = line.substring(5).trim();
+    } else if (lowerLine.startsWith('category:')) {
+      sections[3].content = line.substring(9).trim();
+    } else if (lowerLine.startsWith('price:')) {
+      sections[4].content = line.substring(6).trim();
+    }
+  }
+  
+  // Check which sections have violations
+  const sectionStatus = sections.map(section => {
+    const sectionIssues = flaggedIssues.filter(issue => {
+      if (!section.content) return false;
+      
+      // Check if the flagged term appears in this section's content
+      const sectionLower = section.content.toLowerCase();
+      const termLower = issue.term.toLowerCase();
+      
+      // Direct term match in section content
+      if (sectionLower.includes(termLower)) {
+        return true;
+      }
+      
+      // Check if the context includes this section's content
+      if (issue.found_in?.context) {
+        const contextLower = issue.found_in.context.toLowerCase();
+        // Check if context matches section content
+        return contextLower.includes(sectionLower.substring(0, Math.min(50, sectionLower.length)));
+      }
+      
+      return false;
+    });
+    
+    const status = sectionIssues.length === 0 ? 'pass' : 
+                   sectionIssues.some(issue => ['critical', 'high'].includes(issue.risk_level)) ? 'fail' : 'warning';
+    
+    return {
+      name: section.name,
+      status,
+      issueCount: sectionIssues.length,
+      content: section.content
+    };
+  });
+  
+  return sectionStatus;
 }
 
 /**

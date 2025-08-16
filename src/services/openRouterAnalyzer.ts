@@ -8,6 +8,19 @@ export interface OpenRouterComplianceResult {
   reasoning: string;
   modelUsed: string;
   tokensUsed?: number;
+  // Enhanced fix suggestions
+  detailedFixes?: Array<{
+    originalTerm: string;
+    alternatives: string[];
+    reasoning: string;
+    confidenceScore: number;
+    estimatedFixTime: string;
+    policyReference?: {
+      section: string;
+      link: string;
+      why: string;
+    };
+  }>;
 }
 
 // OpenRouter API configuration
@@ -102,40 +115,39 @@ export class OpenRouterAnalyzer {
     listingDescription: string,
     policies: string
   ): Promise<OpenRouterComplianceResult> {
-    const prompt = `You are an expert Etsy compliance analyzer. Analyze this listing for ALL policy violations with MAXIMUM sensitivity.
+    const prompt = `🚨 CRITICAL ETSY VIOLATION DETECTOR 🚨
 
-🚨 ETSY PROHIBITS (Flag ANY occurrence):
+You are an EXTREMELY STRICT Etsy compliance analyzer. Your job is to CATCH EVERY VIOLATION.
 
-1. TRADEMARK/BRAND VIOLATIONS:
-   - Corporate brands: Nike, Apple, Disney, Coca-Cola, McDonald's, Starbucks
-   - Entertainment: Marvel, Pokemon, Star Wars, Harry Potter, Nintendo
-   - Fashion: Gucci, Louis Vuitton, Chanel, Coach, Prada
-   - Sports: NFL, NBA, MLB, FIFA, Olympics
-   - Food brands: Hershey, Oreo, Kraft, Heinz
+⚠️ IMMEDIATE RED FLAGS - FLAG THESE INSTANTLY:
 
-2. CELEBRITY/PUBLIC FIGURE VIOLATIONS:
-   - Actors: Brad Pitt, Tom Cruise, Jennifer Lawrence, Leonardo DiCaprio
-   - Musicians: Taylor Swift, Beyonce, Drake, Ariana Grande
-   - Politicians: Any president, prime minister, political figure
-   - Influencers: Kim Kardashian, Elon Musk, Oprah
-   - Historical figures: Einstein, Gandhi (if used commercially)
+🔥 STAR WARS (Disney copyright):
+- Yoda, Boba Fett, Darth Vader, Luke Skywalker, Princess Leia, Chewbacca, R2-D2, C-3PO, Obi-Wan, Anakin, Jedi, Sith, Death Star, Millennium Falcon, Empire, Rebel Alliance
 
-3. CHARACTER/IP VIOLATIONS:
-   - Disney: Mickey Mouse, Elsa, Anna, Simba, Buzz Lightyear
-   - Marvel/DC: Spider-Man, Batman, Superman, Iron Man, Hulk
-   - Anime: Naruto, Goku, Pikachu, Hello Kitty
-   - Movies/TV: Harry Potter, Game of Thrones characters
+🔥 CELEBRITIES (Right of publicity):  
+- Brad Pitt, Tom Cruise, Jennifer Lawrence, Leonardo DiCaprio, Angelina Jolie, Will Smith, Dwayne Johnson, Ryan Reynolds, Scarlett Johansson, Robert Downey Jr
 
-4. DANGEROUS PATTERN PHRASES:
-   - "look like [person]", "similar to [brand]", "[celebrity] style"
-   - "inspired by [brand/person]", "knockoff", "replica"
-   - "healing", "cure", "medical", "FDA approved" (health claims)
-   - "vintage [brand]" if using trademark
+🔥 GAMING/HORROR:
+- Five Nights at Freddy's, Freddy Fazbear, Bonnie, Chica, Foxy, FNAF, Scott Cawthon
+- Pokemon, Pikachu, Nintendo, Mario, Zelda, Sonic
 
-5. PROHIBITED ITEMS:
-   - Weapons, drugs, recalled items
-   - Adult content, hazardous materials
-   - Counterfeit, dropshipping indicators
+🔥 DISNEY/MARVEL:
+- Mickey Mouse, Donald Duck, Goofy, Elsa, Anna, Frozen, Lion King, Spider-Man, Iron Man, Captain America, Thor, Hulk, Avengers
+
+🔥 DC COMICS:
+- Batman, Superman, Wonder Woman, Flash, Green Lantern, Joker, Harley Quinn
+
+🔥 OTHER MAJOR IPs:
+- Harry Potter, Hogwarts, Dumbledore, Hermione, Ron Weasley
+- Game of Thrones, Jon Snow, Daenerys, Tyrion
+- Lord of the Rings, Gandalf, Frodo, Legolas
+
+🚨 ANALYSIS INSTRUCTIONS:
+1. Check EVERY SINGLE WORD against the lists above
+2. If you find ANY match, immediately flag it as "fail"  
+3. Be HYPERVIGILANT - even partial matches count
+4. DO NOT give benefit of the doubt - FLAG IT
+5. Better to over-flag than miss a violation
 
 ETSY POLICY DATABASE (from your comprehensive policy analysis):
 ${policies}
@@ -151,19 +163,35 @@ TASK:
 4. Cross-reference with the plain English policy summaries
 5. Be EXTREMELY THOROUGH - flag even subtle references
 
-RESPOND WITH JSON ONLY:
+🔥 EXAMPLE VIOLATIONS TO CATCH:
+- "Yoda hats" → INSTANT FLAG: Star Wars character
+- "Boba Fett armor" → INSTANT FLAG: Star Wars character  
+- "Five Nights at Freddy's" → INSTANT FLAG: Copyrighted game
+- "Brad Pitt mask" → INSTANT FLAG: Celebrity name
+
+RESPOND WITH JSON ONLY - BE RUTHLESS:
 {
   "status": "fail",
-  "flaggedTerms": ["Brad Pitt"],
+  "flaggedTerms": ["Yoda", "Boba Fett", "Five Nights at Freddy's"],
   "violations": [
     {
-      "term": "Brad Pitt",
-      "reason": "Celebrity names cannot be used in listings due to right of publicity laws",
+      "term": "Yoda",
+      "reason": "Star Wars character - Disney copyright violation",
+      "severity": "high"
+    },
+    {
+      "term": "Boba Fett", 
+      "reason": "Star Wars character - Disney copyright violation",
+      "severity": "high"
+    },
+    {
+      "term": "Five Nights at Freddy's",
+      "reason": "Copyrighted game franchise - IP violation", 
       "severity": "high"
     }
   ],
-  "suggestions": ["Remove celebrity reference and use generic terms like 'handsome actor style' instead"],
-  "reasoning": "Found celebrity likeness violation: Using Brad Pitt's name violates right of publicity"
+  "suggestions": ["Remove all Star Wars references", "Remove gaming IP references", "Use generic terms instead"],
+  "reasoning": "Multiple copyright violations detected: Star Wars characters and gaming IP"
 }`;
 
     try {
@@ -188,6 +216,19 @@ RESPOND WITH JSON ONLY:
       const parsed = JSON.parse(jsonMatch[0]);
       console.log('🤖 Parsed AI Result:', parsed);
       
+      // Whitelist of explicitly allowed terms that should never be flagged
+      const allowedTerms = [
+        'posters', 'poster', 'art', 'vintage', 'handmade', 'custom', 'original',
+        'publications', 'films', 'photographs', 'music', 'books', 'records'
+      ];
+      
+      // Filter out whitelisted terms from flagged terms
+      const filteredFlaggedTerms = (parsed.flaggedTerms || []).filter((term: string) => 
+        !allowedTerms.some(allowed => term.toLowerCase().includes(allowed.toLowerCase()))
+      );
+      
+      console.log('🔍 Filtered flagged terms:', { original: parsed.flaggedTerms, filtered: filteredFlaggedTerms });
+      
       // Determine confidence based on model response quality
       let confidence = 0.8;
       if (parsed.violations && parsed.violations.length > 0) {
@@ -195,9 +236,9 @@ RESPOND WITH JSON ONLY:
       }
 
       return {
-        status: parsed.status || 'warning',
-        flaggedTerms: parsed.flaggedTerms || [],
-        suggestions: parsed.suggestions || [],
+        status: filteredFlaggedTerms.length > 0 ? (parsed.status || 'warning') : 'pass',
+        flaggedTerms: filteredFlaggedTerms,
+        suggestions: filteredFlaggedTerms.length > 0 ? (parsed.suggestions || []) : [],
         confidence,
         reasoning: parsed.reasoning || 'AI analysis completed',
         modelUsed: model,
@@ -208,6 +249,140 @@ RESPOND WITH JSON ONLY:
       console.error(`Model ${model} failed:`, error);
       throw error;
     }
+  }
+
+  public async generateFixSuggestions(
+    flaggedTerm: string,
+    context: string,
+    violationType: string
+  ): Promise<{
+    alternatives: string[];
+    reasoning: string;
+    confidenceScore: number;
+    estimatedFixTime: string;
+    policyReference?: {
+      section: string;
+      link: string;
+      why: string;
+    };
+  }> {
+    const fixPrompt = `You are an expert Etsy policy advisor. Generate specific, actionable alternatives for a flagged term.
+
+FLAGGED TERM: "${flaggedTerm}"
+CONTEXT: "${context}"
+VIOLATION TYPE: ${violationType}
+
+CRITICAL: Your alternatives must COMPLETELY AVOID the flagged term. Do NOT include the flagged term in any form.
+
+Generate 3-5 specific alternatives that:
+1. Maintain the original meaning/intent WITHOUT using the flagged term
+2. Comply with Etsy policies (NO celebrity names, trademarks, or copyrighted content)
+3. Sound natural and professional
+4. Are appropriate for the product context
+5. Use generic descriptive terms instead of specific names
+
+EXAMPLES:
+- Instead of "Brad Pitt mask" → "Hollywood leading man mask", "Movie star costume mask", "Classic actor style mask"
+- Instead of "Nike shoes" → "Athletic sneakers", "Sports footwear", "Running shoes"
+- Instead of "Disney character" → "Animated character", "Fantasy character", "Children's storybook character"
+
+RESPOND WITH JSON ONLY:
+{
+  "alternatives": [
+    "alternative 1",
+    "alternative 2", 
+    "alternative 3"
+  ],
+  "reasoning": "Why these alternatives work and avoid policy violations",
+  "confidenceScore": 0.9,
+  "estimatedFixTime": "30 seconds",
+  "policyReference": {
+    "section": "Relevant Etsy Policy Section",
+    "link": "https://help.etsy.com/relevant-section",
+    "why": "Brief explanation of why original term violates this policy"
+  }
+}`;
+
+    try {
+      for (const model of PREFERRED_MODELS) {
+        try {
+          const response = await this.callOpenRouter(model, [
+            { role: 'user', content: fixPrompt }
+          ]);
+
+          const content = response.choices?.[0]?.message?.content;
+          if (!content) continue;
+
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) continue;
+
+          const parsed = JSON.parse(jsonMatch[0]);
+          return {
+            alternatives: parsed.alternatives || [],
+            reasoning: parsed.reasoning || '',
+            confidenceScore: parsed.confidenceScore || 0.8,
+            estimatedFixTime: parsed.estimatedFixTime || '1 minute',
+            policyReference: parsed.policyReference
+          };
+        } catch (error) {
+          console.error(`Model ${model} failed for fix suggestions:`, error);
+          continue;
+        }
+      }
+    } catch (error) {
+      console.error('Fix suggestion generation failed:', error);
+    }
+
+    // Fallback fix suggestions
+    return this.getFallbackFixSuggestions(flaggedTerm, violationType);
+  }
+
+  private getFallbackFixSuggestions(term: string, violationType: string) {
+    const fallbacks = {
+      'trademark': [
+        'Branded-style item',
+        'Designer-inspired piece', 
+        'Premium quality product'
+      ],
+      'celebrity': [
+        'Movie star style mask',
+        'Hollywood leading man costume',
+        'Classic actor-inspired design',
+        'Celebrity lookalike mask',
+        'Famous personality style'
+      ],
+      'copyright': [
+        'Original character design',
+        'Unique artistic creation',
+        'Custom character artwork',
+        'Fantasy character mask'
+      ],
+      'ai_detected': [
+        'Hollywood actor style',
+        'Movie star costume mask',
+        'Leading man character mask',
+        'Classic film star look'
+      ],
+      'default': [
+        'Generic alternative wording',
+        'Compliant description',
+        'Policy-friendly term'
+      ]
+    };
+
+    const alternatives = fallbacks[violationType as keyof typeof fallbacks] || fallbacks.default;
+    
+    return {
+      alternatives,
+      reasoning: 'These alternatives help avoid policy violations while maintaining your listing\'s appeal.',
+      confidenceScore: 0.6,
+      estimatedFixTime: '2 minutes',
+      policyReference: {
+        section: 'Etsy Policy Guidelines',
+        link: 'https://help.etsy.com/hc/en-us/articles/115015628847',
+        why: 'Original term may conflict with Etsy marketplace policies'
+      }
+    };
   }
 
   public async analyzeCompliance(
