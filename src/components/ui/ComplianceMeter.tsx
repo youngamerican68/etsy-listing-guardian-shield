@@ -13,19 +13,12 @@ interface ComplianceMeterProps {
   overallStatus: 'pass' | 'fail';
   sectionBreakdown: SectionStatus[];
   totalIssues: number;
-  riskAssessment: {
-    critical: number;
-    high: number;
-    medium: number;
-    low: number;
-  };
 }
 
 const ComplianceMeter: React.FC<ComplianceMeterProps> = ({
   overallStatus,
   sectionBreakdown,
-  totalIssues,
-  riskAssessment
+  totalIssues
 }) => {
 
   const getStatusIcon = (status: 'pass' | 'warning' | 'fail') => {
@@ -92,31 +85,13 @@ const ComplianceMeter: React.FC<ComplianceMeterProps> = ({
           </div>
         </div>
 
-        {/* Risk Breakdown */}
-        <div className="grid grid-cols-4 gap-3 mb-6">
-          <div className="text-center">
-            <div className="text-lg font-bold text-red-600">
-              {riskAssessment.critical}
-            </div>
-            <div className="text-xs text-gray-600">Critical</div>
+        {/* Violation Count */}
+        <div className="text-center mb-6">
+          <div className="text-3xl font-bold text-red-600">
+            {totalIssues}
           </div>
-          <div className="text-center">
-            <div className="text-lg font-bold text-red-500">
-              {riskAssessment.high}
-            </div>
-            <div className="text-xs text-gray-600">High</div>
-          </div>
-          <div className="text-center">
-            <div className="text-lg font-bold text-orange-500">
-              {riskAssessment.medium}
-            </div>
-            <div className="text-xs text-gray-600">Medium</div>
-          </div>
-          <div className="text-center">
-            <div className="text-lg font-bold text-green-500">
-              {riskAssessment.low}
-            </div>
-            <div className="text-xs text-gray-600">Low</div>
+          <div className="text-sm text-gray-600">
+            {totalIssues === 1 ? 'Violation Found' : 'Violations Found'}
           </div>
         </div>
 

@@ -215,7 +215,10 @@ export async function analyzeListingContent(listingText) {
     });
     
     flaggedIssues.forEach(issue => {
-      riskAssessment[issue.risk_level]++;
+      // Skip risk level processing for binary system
+      if (issue.risk_level) {
+        riskAssessment[issue.risk_level]++;
+      }
     });
 
     // 5. Determine overall risk level
@@ -260,7 +263,7 @@ export async function analyzeListingContent(listingText) {
       compliance_status: flaggedIssues.length === 0 ? 'compliant' : 'needs_review'
     };
 
-    console.log(`✅ Analysis complete: ${flaggedIssues.length} issues found, overall risk: ${riskAssessment.overall}`);
+    console.log(`✅ Analysis complete: ${flaggedIssues.length} issues found, status: ${flaggedIssues.length > 0 ? 'violations detected' : 'clean'}`);
     console.log(`🔍 Final flagged issues:`, flaggedIssues);
     console.log(`🔍 Final analysis report:`, analysisReport);
     return analysisReport;

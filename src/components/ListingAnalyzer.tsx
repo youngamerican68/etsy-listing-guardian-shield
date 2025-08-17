@@ -9,15 +9,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
-import { Upload, Type, AlertTriangle, CheckCircle, XCircle, AlertCircle, FileText, Zap, Info, Image, Tag, DollarSign, Package, Edit3, Sidebar } from "lucide-react";
+import { Upload, Type, AlertTriangle, CheckCircle, XCircle, AlertCircle, FileText, Zap, Info, Image, Tag, DollarSign, Package, Sidebar } from "lucide-react";
 import { analyzeListingContent } from '../services/listingAnalyzer';
 import { openRouterAnalyzer } from '../services/openRouterAnalyzer';
 
 // Import new enhanced components
 import ComplianceMeter from './ui/ComplianceMeter';
-import SuggestedFix from './ui/SuggestedFix';
+import ViolationDisplay from './ui/ViolationDisplay';
 import SuccessIndicators from './ui/SuccessIndicators';
-import InlineEditor from './ui/InlineEditor';
 import FixPrioritySidebar from './ui/FixPrioritySidebar';
 
 interface AnalysisResult {
@@ -26,18 +25,10 @@ interface AnalysisResult {
   analysis_results: {
     total_issues: number;
     compliance_score: number;
-    risk_assessment: {
-      overall: string;
-      critical: number;
-      high: number;
-      medium: number;
-      low: number;
-    };
     flagged_issues: Array<{
       type: string;
       term: string;
       category: string;
-      risk_level: string;
       description: string;
       found_in?: {
         context: string;
@@ -87,21 +78,17 @@ const ListingAnalyzer: React.FC = () => {
   const [inputMethod, setInputMethod] = useState<'form' | 'upload'>('form');
   
   // Enhanced UI state
-  const [showInlineEditor, setShowInlineEditor] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [fixSuggestions, setFixSuggestions] = useState<Map<string, any>>(new Map());
   const [completedFixes, setCompletedFixes] = useState<Set<string>>(new Set());
-  const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState<Set<string>>(new Set());
 
-  // Clear suggestions when starting new analysis to prevent mix-ups
+  // Clear state when starting new analysis
   useEffect(() => {
     if (isAnalyzing) {
-      console.log('🧹 Clearing previous suggestions due to new analysis');
-      setFixSuggestions(new Map());
-      setIsGeneratingSuggestions(new Set());
+      console.log('🧹 Clearing previous state due to new analysis');
       setCompletedFixes(new Set());
     }
   }, [isAnalyzing]);
+
 
   // Enhanced handler functions
   const handleApplyFix = useCallback(async (originalTerm: string, replacement: string) => {
@@ -135,62 +122,7 @@ const ListingAnalyzer: React.FC = () => {
     window.open(`https://help.etsy.com/hc/en-us/search?query=${encodeURIComponent(policySection)}`, '_blank');
   }, []);
 
-  const handleGenerateFixSuggestion = useCallback(async (issue: any) => {
-    const issueKey = issue.term.toLowerCase().trim();
-    const analysisTimestamp = analysisResult?.timestamp || '';
-    const uniqueKey = `${issueKey}_${analysisTimestamp}`;
-    
-    // Enhanced deduplication check with more detailed logging
-    if (fixSuggestions.has(issueKey)) {
-      console.log(`🔄 Fix suggestion already exists for: "${issueKey}"`);
-      return;
-    }
-    
-    if (isGeneratingSuggestions.has(issueKey)) {
-      console.log(`⏳ Fix suggestion already generating for: "${issueKey}"`);
-      return;
-    }
 
-    console.log(`🚀 Generating fix suggestion for: "${issueKey}" (analysis: ${analysisTimestamp})`);
-    setIsGeneratingSuggestions(prev => new Set([...prev, issueKey]));
-
-    try {
-      const suggestion = await openRouterAnalyzer.generateFixSuggestions(
-        issue.term,
-        issue.found_in?.context || '',
-        issue.category
-      );
-      
-      // Add metadata to track which analysis this suggestion belongs to
-      const enhancedSuggestion = {
-        ...suggestion,
-        generatedAt: new Date().toISOString(),
-        forAnalysis: analysisTimestamp,
-        originalTerm: issue.term
-      };
-      
-      console.log(`✅ Generated suggestion for: "${issueKey}"`, enhancedSuggestion);
-      setFixSuggestions(prev => new Map([...prev, [issueKey, enhancedSuggestion]]));
-    } catch (error) {
-      console.error(`❌ Failed to generate fix suggestion for "${issueKey}":`, error);
-    } finally {
-      setIsGeneratingSuggestions(prev => {
-        const newSet = new Set([...prev]);
-        newSet.delete(issueKey);
-        console.log(`✨ Completed suggestion generation for: "${issueKey}"`);
-        return newSet;
-      });
-    }
-  }, [fixSuggestions, isGeneratingSuggestions, analysisResult?.timestamp]);
-
-  const handleInlineEditorSave = useCallback((content: any) => {
-    setListingTitle(content.title);
-    setListingDescription(content.description);
-    setListingTags(content.tags);
-    setListingCategory(content.category);
-    setListingPrice(content.price);
-    setShowInlineEditor(false);
-  }, []);
 
   const handleExportFixList = useCallback(() => {
     if (!analysisResult) return;
@@ -199,15 +131,14 @@ const ListingAnalyzer: React.FC = () => {
       priority: index + 1,
       term: issue.term,
       category: issue.category,
-      risk: issue.risk_level,
       description: issue.description,
       completed: completedFixes.has(issue.term) ? 'Yes' : 'No'
     }));
 
     const csvContent = [
-      'Priority,Term,Category,Risk Level,Description,Completed',
+      'Priority,Term,Category,Description,Completed',
       ...fixList.map(item => 
-        `${item.priority},"${item.term}","${item.category}","${item.risk}","${item.description}","${item.completed}"`
+        `${item.priority},"${item.term}","${item.category}","${item.description}","${item.completed}"`
       )
     ].join('\n');
 
@@ -312,37 +243,6 @@ const ListingAnalyzer: React.FC = () => {
     setError(null);
   };
 
-  // Get risk level styling
-  const getRiskStyling = (risk: string) => {
-    switch (risk) {
-      case 'critical':
-        return 'bg-red-600 text-white';
-      case 'high':
-        return 'bg-red-500 text-white';
-      case 'medium':
-        return 'bg-yellow-500 text-white';
-      case 'low':
-        return 'bg-green-500 text-white';
-      default:
-        return 'bg-gray-500 text-white';
-    }
-  };
-
-  // Get risk icon
-  const getRiskIcon = (risk: string) => {
-    switch (risk) {
-      case 'critical':
-        return <XCircle className="h-4 w-4" />;
-      case 'high':
-        return <AlertTriangle className="h-4 w-4" />;
-      case 'medium':
-        return <AlertCircle className="h-4 w-4" />;
-      case 'low':
-        return <CheckCircle className="h-4 w-4" />;
-      default:
-        return <AlertCircle className="h-4 w-4" />;
-    }
-  };
 
   return (
     <TooltipProvider>
@@ -371,32 +271,6 @@ const ListingAnalyzer: React.FC = () => {
             </TabsList>
 
             <TabsContent value="form" className="space-y-6 mt-6">
-              {/* Photos Section */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <Image className="h-5 w-5 text-orange-600" />
-                  <h3 className="text-lg font-semibold text-gray-900">Photos</h3>
-                </div>
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-400 transition-colors bg-gray-50">
-                  <Image className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                  <p className="text-sm text-gray-600 mb-2">
-                    Add up to 10 photos to showcase your item
-                  </p>
-                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <p className="text-xs text-blue-700 font-medium mb-1">
-                      💡 Photo Analysis Coming Soon
-                    </p>
-                    <p className="text-xs text-blue-600">
-                      Currently analyzing text only. Image analysis for trademark logos, copyrighted characters, and policy violations will be added in a future update.
-                    </p>
-                  </div>
-                  <Button variant="outline" size="sm">
-                    Add Photos
-                  </Button>
-                </div>
-              </div>
-
-              <Separator />
 
               {/* About This Listing Section */}
               <div className="space-y-4">
@@ -578,68 +452,33 @@ const ListingAnalyzer: React.FC = () => {
               overallStatus={analysisResult.analysis_results.total_issues === 0 ? 'pass' : 'fail'}
               sectionBreakdown={analysisResult.analysis_results.section_health || []}
               totalIssues={analysisResult.analysis_results.total_issues}
-              riskAssessment={analysisResult.analysis_results.risk_assessment}
             />
 
-            {/* Success Indicators */}
-            {analysisResult.analysis_results.ui_data?.clean_sections && 
+            {/* Success Indicators - Only show when fully compliant */}
+            {analysisResult.analysis_results.total_issues === 0 && 
+             analysisResult.analysis_results.ui_data?.clean_sections && 
              analysisResult.analysis_results.ui_data.clean_sections.length > 0 && (
               <SuccessIndicators
                 cleanSections={analysisResult.analysis_results.ui_data.clean_sections}
-                complianceScore={analysisResult.analysis_results.total_issues === 0 ? 100 : 0}
+                complianceScore={100}
                 totalIssuesFixed={completedFixes.size}
-                showCelebration={analysisResult.analysis_results.total_issues === 0}
+                showCelebration={true}
               />
             )}
 
             {/* Action Buttons */}
             <div className="flex flex-wrap gap-3">
               {analysisResult.analysis_results.flagged_issues.length > 0 && (
-                <>
-                  <Button
-                    onClick={() => setShowInlineEditor(!showInlineEditor)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    <Edit3 className="h-4 w-4 mr-2" />
-                    {showInlineEditor ? 'Hide Editor' : 'Fix Issues Now'}
-                  </Button>
-                  
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowSidebar(!showSidebar)}
-                  >
-                    <Sidebar className="h-4 w-4 mr-2" />
-                    {showSidebar ? 'Hide' : 'Show'} Priority List
-                  </Button>
-                </>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowSidebar(!showSidebar)}
+                >
+                  <Sidebar className="h-4 w-4 mr-2" />
+                  {showSidebar ? 'Hide' : 'Show'} Priority List
+                </Button>
               )}
             </div>
 
-            {/* Inline Editor */}
-            {showInlineEditor && (
-              <InlineEditor
-                originalContent={{
-                  title: listingTitle,
-                  description: listingDescription,
-                  tags: listingTags,
-                  category: listingCategory,
-                  price: listingPrice
-                }}
-                onContentChange={() => {}} // Real-time changes handled in component
-                onReanalyze={async (content) => {
-                  setIsAnalyzing(true);
-                  try {
-                    const result = await analyzeListingContent(content);
-                    setAnalysisResult(result);
-                  } finally {
-                    setIsAnalyzing(false);
-                  }
-                }}
-                onSave={handleInlineEditorSave}
-                onCancel={() => setShowInlineEditor(false)}
-                isAnalyzing={isAnalyzing}
-              />
-            )}
 
             {/* Enhanced Flagged Issues */}
             {analysisResult.analysis_results.flagged_issues.length > 0 && (
@@ -659,15 +498,13 @@ const ListingAnalyzer: React.FC = () => {
                     const issueKey = issue.term.toLowerCase().trim();
                     
                     return (
-                      <SuggestedFix
+                      <ViolationDisplay
                         key={`${issueKey}-${index}`}
                         issue={issue}
-                        suggestedFix={fixSuggestions.get(issueKey)}
-                        onApplyFix={handleApplyFix}
                         onMarkFalsePositive={handleMarkFalsePositive}
                         onLearnMore={handleLearnMore}
-                        isLoading={isGeneratingSuggestions.has(issueKey)}
-                        onRequestSuggestion={() => handleGenerateFixSuggestion(issue)}
+                        debugKey={issueKey}
+                        debugOriginalTerm={issue.term}
                       />
                     );
                   })}
@@ -713,13 +550,11 @@ const ListingAnalyzer: React.FC = () => {
             <div className="lg:col-span-1">
               <FixPrioritySidebar
                 issues={analysisResult.analysis_results.flagged_issues.map((issue, index) => {
-                  const issueKey = issue.term.toLowerCase().trim();
                   return {
                     id: issue.term,
                     term: issue.term,
                     category: issue.category,
-                    risk_level: issue.risk_level,
-                    estimatedFixTime: fixSuggestions.get(issueKey)?.estimatedFixTime || '2 min',
+                    estimatedFixTime: '2 min',
                     priority: index + 1,
                     isCompleted: completedFixes.has(issue.term)
                   };
